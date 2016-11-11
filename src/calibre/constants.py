@@ -4,7 +4,7 @@ __license__   = 'GPL v3'
 __copyright__ = '2008, Kovid Goyal kovid@kovidgoyal.net'
 __docformat__ = 'restructuredtext en'
 __appname__   = u'calibre'
-numeric_version = (2, 56, 0)
+numeric_version = (2, 71, 0)
 __version__   = u'.'.join(map(unicode, numeric_version))
 __author__    = u"Kovid Goyal <kovid@kovidgoyal.net>"
 
@@ -45,6 +45,8 @@ win32api   = importlib.import_module('win32api') if iswindows else None
 fcntl      = None if iswindows else importlib.import_module('fcntl')
 
 _osx_ver = None
+
+
 def get_osx_version():
     global _osx_ver
     if _osx_ver is None:
@@ -77,11 +79,13 @@ else:
 
 DEBUG = False
 
+
 def debug():
     global DEBUG
     DEBUG = True
 
 _cache_dir = None
+
 
 def _get_cache_dir():
     confcache = os.path.join(config_dir, u'caches')
@@ -114,6 +118,7 @@ def _get_cache_dir():
             candidate = confcache
     return candidate
 
+
 def cache_dir():
     global _cache_dir
     if _cache_dir is None:
@@ -121,6 +126,7 @@ def cache_dir():
     return _cache_dir
 
 # plugins {{{
+
 
 class Plugins(collections.Mapping):
 
@@ -130,7 +136,6 @@ class Plugins(collections.Mapping):
                 'pictureflow',
                 'lzx',
                 'msdes',
-                'magick',
                 'podofo',
                 'cPalmdoc',
                 'progress_indicator',
@@ -143,6 +148,7 @@ class Plugins(collections.Mapping):
                 'html',
                 'freetype',
                 'unrar',
+                'imageops',
                 'qt_hack',
                 '_regex',
                 'hunspell',
@@ -231,6 +237,7 @@ else:
         print 'No write acces to', config_dir, 'using a temporary dir instead'
         import tempfile, atexit
         config_dir = tempfile.mkdtemp(prefix='calibre-config-')
+
         def cleanup_cdir():
             try:
                 import shutil
@@ -239,6 +246,7 @@ else:
                 pass
         atexit.register(cleanup_cdir)
 # }}}
+
 
 def get_version():
     '''Return version string for display to user '''
@@ -253,10 +261,12 @@ def get_version():
 
     return v
 
+
 def get_portable_base():
     'Return path to the directory that contains calibre-portable.exe or None'
     if isportable:
         return os.path.dirname(os.path.dirname(os.environ['CALIBRE_PORTABLE_BUILD']))
+
 
 def get_unicode_windows_env_var(name):
     import ctypes
@@ -267,6 +277,7 @@ def get_unicode_windows_env_var(name):
     buf = ctypes.create_unicode_buffer(u'\0'*n)
     ctypes.windll.kernel32.GetEnvironmentVariableW(name, buf, n)
     return buf.value
+
 
 def get_windows_username():
     '''
@@ -288,6 +299,7 @@ def get_windows_username():
 
     return get_unicode_windows_env_var(u'USERNAME')
 
+
 def get_windows_temp_path():
     import ctypes
     n = ctypes.windll.kernel32.GetTempPathW(0, None)
@@ -297,6 +309,7 @@ def get_windows_temp_path():
     ctypes.windll.kernel32.GetTempPathW(n, buf)
     ans = buf.value
     return ans if ans else None
+
 
 def get_windows_user_locale_name():
     import ctypes
@@ -308,3 +321,32 @@ def get_windows_user_locale_name():
         return None
     return u'_'.join(buf.value.split(u'-')[:2])
 
+number_formats = None
+
+
+def get_windows_number_formats():
+    # This can be changed to use localeconv() once we switch to Visual Studio
+    # 2015 as localeconv() in that version has unicode variants for all strings.
+    global number_formats
+    if number_formats is None:
+        import ctypes
+        from ctypes.wintypes import DWORD
+        k32 = ctypes.windll.kernel32
+        n = 25
+        buf = ctypes.create_unicode_buffer(u'\0'*n)
+        k32.GetNumberFormatEx.argtypes = [ctypes.c_wchar_p, DWORD, ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+        k32.GetNumberFormatEx.restype = ctypes.c_int
+        if k32.GetNumberFormatEx(None, 0, u'123456.7', None, buf, n) == 0:
+            raise ctypes.WinError()
+        src = buf.value
+        thousands_sep, decimal_point = u',.'
+        idx = src.find(u'6')
+        if idx > -1 and src[idx+1] != u'7':
+            decimal_point = src[idx+1]
+            src = src[:idx]
+        for c in src:
+            if c not in u'123456':
+                thousands_sep = c
+                break
+        number_formats = (thousands_sep, decimal_point)
+    return number_formats

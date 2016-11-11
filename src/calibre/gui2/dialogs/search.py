@@ -18,6 +18,7 @@ from calibre.utils.localization import localize_user_manual_link
 box_values = {}
 last_matchkind = CONTAINS_MATCH
 
+
 def init_dateop(cb):
     for op, desc in [
             ('=', _('equal to')),
@@ -28,15 +29,17 @@ def init_dateop(cb):
     ]:
         cb.addItem(desc, op)
 
+
 def current_dateop(cb):
     return unicode(cb.itemData(cb.currentIndex()) or '')
+
 
 class SearchDialog(QDialog, Ui_Dialog):
 
     def __init__(self, parent, db):
         QDialog.__init__(self, parent)
         self.setupUi(self)
-        self.um_label.setText(self.um_label.text() % localize_user_manual_link('http://manual.calibre-ebook.com/gui.html#the-search-interface'))
+        self.um_label.setText(self.um_label.text() % localize_user_manual_link('https://manual.calibre-ebook.com/gui.html#the-search-interface'))
         for val, text in [(0, '')] + [(i, strftime('%B', date(2010, i, 1).timetuple())) for i in xrange(1, 13)]:
             self.date_month.addItem(text, val)
         for val, text in [('today', _('Today')), ('yesterday', _('Yesterday')), ('thismonth', _('This month'))]:

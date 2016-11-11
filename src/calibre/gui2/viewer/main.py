@@ -1,23 +1,22 @@
 __license__   = 'GPL v3'
 __copyright__ = '2008, Kovid Goyal <kovid at kovidgoyal.net>'
 
-import traceback, os, sys, functools, time
+import traceback, os, sys, functools
 from functools import partial
 from threading import Thread
-from collections import namedtuple
 
 from PyQt5.Qt import (
-    QApplication, Qt, QIcon, QTimer, QByteArray, QSize, QTime,
+    QApplication, Qt, QIcon, QTimer, QByteArray, QSize, QTime, QObject,
     QPropertyAnimation, QUrl, QInputDialog, QAction, QModelIndex, pyqtSignal)
 
 from calibre.gui2.viewer.ui import Main as MainWindow
 from calibre.gui2.viewer.toc import TOC
 from calibre.gui2.widgets import ProgressIndicator
 from calibre.gui2 import (
-    Application, ORG_NAME, APP_UID, choose_files, info_dialog, error_dialog,
+    Application, choose_files, info_dialog, error_dialog,
     open_url, setup_gui_option_parser)
 from calibre.ebooks.oeb.iterator.book import EbookIterator
-from calibre.constants import islinux, filesystem_encoding
+from calibre.constants import islinux, filesystem_encoding, DEBUG, iswindows
 from calibre.utils.config import Config, StringConfig, JSONConfig
 from calibre.customize.ui import available_input_formats
 from calibre import as_unicode, force_unicode, isbytestring, prints
@@ -25,12 +24,50 @@ from calibre.ptempfile import reset_base_dir
 from calibre.utils.ipc import viewer_socket_address, RC
 from calibre.utils.zipfile import BadZipfile
 from calibre.utils.localization import canonicalize_lang, lang_as_iso639_1, get_lang
+try:
+    from calibre.utils.monotonic import monotonic
+except RuntimeError:
+    from time import time as monotonic
 
 vprefs = JSONConfig('viewer')
 vprefs.defaults['singleinstance'] = False
 dprefs = JSONConfig('viewer_dictionaries')
 dprefs.defaults['word_lookups'] = {}
 singleinstance_name = 'calibre_viewer'
+
+
+class ResizeEvent(object):
+
+    INTERVAL = 20  # mins
+
+    def __init__(self, size_before, multiplier, last_loaded_path, page_number):
+        self.size_before, self.multiplier, self.last_loaded_path = size_before, multiplier, last_loaded_path
+        self.page_number = page_number
+        self.timestamp = monotonic()
+        self.finished_timestamp = 0
+        self.multiplier_after = self.last_loaded_path_after = self.page_number_after = None
+
+    def finished(self, size_after, multiplier, last_loaded_path, page_number):
+        self.size_after, self.multiplier_after = size_after, multiplier
+        self.last_loaded_path_after = last_loaded_path
+        self.page_number_after = page_number
+        self.finished_timestamp = monotonic()
+
+    def is_a_toggle(self, previous):
+        if self.finished_timestamp - previous.finished_timestamp > self.INTERVAL * 60:
+            # The second resize occurred too long after the first one
+            return False
+        if self.size_after != previous.size_before:
+            # The second resize is to a different size than the first one
+            return False
+        if self.multiplier_after != previous.multiplier or self.last_loaded_path_after != previous.last_loaded_path:
+            # A new file has been loaded or the text size multiplier has changed
+            return False
+        if self.page_number != previous.page_number_after:
+            # The use has scrolled between the two resizes
+            return False
+        return True
+
 
 class Worker(Thread):
 
@@ -51,11 +88,13 @@ class Worker(Thread):
             self.exception = err
             self.traceback = traceback.format_exc()
 
+
 class RecentAction(QAction):
 
     def __init__(self, path, parent):
         self.path = path
         QAction.__init__(self, os.path.basename(path), parent)
+
 
 def default_lookup_website(lang):
     if lang == 'und':
@@ -67,11 +106,13 @@ def default_lookup_website(lang):
         prefix = 'http://%s.wiktionary.org/wiki/' % lang
     return prefix + '{word}'
 
+
 def lookup_website(lang):
     if lang == 'und':
         lang = get_lang()
     wm = dprefs['word_lookups']
     return wm.get(lang, default_lookup_website(lang))
+
 
 def listen(self):
     while True:
@@ -86,6 +127,7 @@ def listen(self):
             prints('Failed to read message from other instance with error: %s' % as_unicode(e))
     self.listener = None
 
+
 class EbookViewer(MainWindow):
 
     STATE_VERSION = 2
@@ -97,9 +139,10 @@ class EbookViewer(MainWindow):
     msg_from_anotherinstance = pyqtSignal(object)
 
     def __init__(self, pathtoebook=None, debug_javascript=False, open_at=None,
-                 start_in_fullscreen=False, continue_reading=False, listener=None):
+                 start_in_fullscreen=False, continue_reading=False, listener=None, file_events=()):
         MainWindow.__init__(self, debug_javascript)
         self.view.magnification_changed.connect(self.magnification_changed)
+        self.resize_events_stack = []
         self.closed = False
         self.show_toc_on_open = False
         self.listener = listener
@@ -123,7 +166,6 @@ class EbookViewer(MainWindow):
         self.existing_bookmarks= []
         self.selected_text     = None
         self.was_maximized     = False
-        self.page_position_on_footnote_toggle = []
         self.read_settings()
         self.autosave_timer = t = QTimer(self)
         t.setInterval(self.AUTOSAVE_INTERVAL * 1000), t.setSingleShot(True)
@@ -143,6 +185,7 @@ class EbookViewer(MainWindow):
         self.action_reload = QAction(_('&Reload book'), self)
         self.action_reload.triggered.connect(self.reload_book)
         self.action_quit.triggered.connect(self.quit)
+        QApplication.instance().shutdown_signal_received.connect(self.action_quit.trigger)
         self.action_reference_mode.triggered[bool].connect(self.view.reference_mode)
         self.action_metadata.triggered[bool].connect(self.metadata.setVisible)
         self.action_table_of_contents.toggled[bool].connect(self.set_toc_visible)
@@ -165,6 +208,7 @@ class EbookViewer(MainWindow):
         self.search.focus_to_library.connect(lambda: self.view.setFocus(Qt.OtherFocusReason))
         self.toc.pressed[QModelIndex].connect(self.toc_clicked)
         self.toc.searched.connect(partial(self.toc_clicked, force=True))
+
         def toggle_toc(ev):
             try:
                 key = self.view.shortcuts.get_match(ev)
@@ -184,11 +228,14 @@ class EbookViewer(MainWindow):
         self.set_bookmarks([])
         self.load_theme_menu()
 
+        file_events.got_file.connect(self.load_ebook)
         if pathtoebook is not None:
             f = functools.partial(self.load_ebook, pathtoebook, open_at=open_at)
             QTimer.singleShot(50, f)
         elif continue_reading:
             QTimer.singleShot(50, self.continue_reading)
+        else:
+            QTimer.singleShot(50, file_events.flush)
         self.window_mode_changed = None
         self.toggle_toolbar_action = QAction(_('Show/hide controls'), self)
         self.toggle_toolbar_action.setCheckable(True)
@@ -227,6 +274,10 @@ class EbookViewer(MainWindow):
         t.setSingleShot(True), t.setInterval(3000)
         t.timeout.connect(self.hide_cursor)
         t.start()
+
+    def process_file_events(self):
+        if self.file_events:
+            self.load_ebook(self.file_events[-1])
 
     def eventFilter(self, obj, ev):
         if ev.type() == ev.MouseMove:
@@ -721,29 +772,12 @@ class EbookViewer(MainWindow):
         self.open_progress_indicator(_('Laying out %s')%self.current_title)
         self.view.load_path(path, pos=pos)
 
-    def footnote_visibility_changed(self, is_visible):
-        if self.view.document.in_paged_mode:
-            pp = namedtuple('PagePosition', 'time is_visible page_dimensions multiplier last_loaded_path page_number after_resize_page_number')
-            self.page_position_on_footnote_toggle.append(pp(
-                time.time(), is_visible, self.view.document.page_dimensions, self.view.multiplier,
-                self.view.last_loaded_path, self.view.document.page_number, None))
-
-    def pre_footnote_toggle_position(self):
-        num = len(self.page_position_on_footnote_toggle)
-        if self.view.document.in_paged_mode and num > 1 and num % 2 == 0:
-            two, one = self.page_position_on_footnote_toggle.pop(), self.page_position_on_footnote_toggle.pop()
-            if (
-                    time.time() - two.time < 1 and not two.is_visible and one.is_visible and
-                    one.last_loaded_path == two.last_loaded_path and two.last_loaded_path == self.view.last_loaded_path and
-                    one.page_dimensions == self.view.document.page_dimensions and one.multiplier == self.view.multiplier and
-                    one.after_resize_page_number == self.view.document.page_number
-            ):
-                return one.page_number
-
     def viewport_resize_started(self, event):
         if not self.resize_in_progress:
             # First resize, so save the current page position
             self.resize_in_progress = True
+            re = ResizeEvent(event.oldSize(), self.view.multiplier, self.view.last_loaded_path, self.view.document.page_number)
+            self.resize_events_stack.append(re)
             if not self.window_mode_changed:
                 # The special handling for window mode changed will already
                 # have saved page position, so only save it if this is not a
@@ -774,19 +808,24 @@ class EbookViewer(MainWindow):
         else:
             if self.isFullScreen():
                 self.relayout_fullscreen_labels()
+            self.view.document.page_position.restore()
+            self.update_page_number()
 
-            pre_footnote_pos = self.pre_footnote_toggle_position()
-            if pre_footnote_pos is not None:
-                self.view.document.page_number = pre_footnote_pos
-            else:
-                self.view.document.page_position.restore()
-                self.update_page_number()
-                if len(self.page_position_on_footnote_toggle) % 2 == 1:
-                    self.page_position_on_footnote_toggle[-1] = self.page_position_on_footnote_toggle[-1]._replace(
-                        after_resize_page_number=self.view.document.page_number)
         if self.pending_goto_page is not None:
             pos, self.pending_goto_page = self.pending_goto_page, None
             self.goto_page(pos, loaded_check=False)
+        else:
+            if self.resize_events_stack:
+                self.resize_events_stack[-1].finished(self.view.size(), self.view.multiplier, self.view.last_loaded_path, self.view.document.page_number)
+                if len(self.resize_events_stack) > 1:
+                    previous, current = self.resize_events_stack[-2:]
+                    if current.is_a_toggle(previous) and previous.page_number is not None and self.view.document.in_paged_mode:
+                        if DEBUG:
+                            print('Detected a toggle resize, restoring previous page')
+                        self.view.document.page_number = previous.page_number
+                        del self.resize_events_stack[-2:]
+                    else:
+                        del self.resize_events_stack[-2]
 
     def update_page_number(self):
         self.set_page_number(self.view.document.scroll_fraction)
@@ -898,6 +937,7 @@ class EbookViewer(MainWindow):
         self.raise_()
 
     def load_ebook(self, pathtoebook, open_at=None, reopen_at=None):
+        del self.resize_events_stack[:]
         if self.iterator is not None:
             self.save_current_position()
             self.iterator.__exit__()
@@ -922,10 +962,9 @@ class EbookViewer(MainWindow):
                         det_msg=tb, show=True)
             self.close_progress_indicator()
         else:
-            self.metadata.show_opf(self.iterator.opf,
-                    self.iterator.book_format)
+            self.metadata.show_metadata(self.iterator.mi, self.iterator.book_format)
             self.view.current_language = self.iterator.language
-            title = self.iterator.opf.title
+            title = self.iterator.mi.title
             if not title:
                 title = os.path.splitext(os.path.basename(pathtoebook))[0]
             if self.iterator.toc:
@@ -1084,6 +1123,7 @@ class EbookViewer(MainWindow):
     def show_footnote_view(self):
         self.footnotes_dock.show()
 
+
 def config(defaults=None):
     desc = _('Options to control the ebook viewer')
     if defaults is None:
@@ -1109,6 +1149,7 @@ def config(defaults=None):
 
     return c
 
+
 def option_parser():
     c = config()
     parser = c.option_parser(usage=_('''\
@@ -1118,6 +1159,7 @@ View an ebook.
 '''))
     setup_gui_option_parser(parser)
     return parser
+
 
 def create_listener():
     if islinux:
@@ -1154,21 +1196,50 @@ def ensure_single_instance(args, open_at):
     return listener
 
 
+class EventAccumulator(QObject):
+
+    got_file = pyqtSignal(object)
+
+    def __init__(self):
+        QObject.__init__(self)
+        self.events = []
+
+    def __call__(self, paths):
+        for path in paths:
+            if os.path.exists(path):
+                self.events.append(path)
+                self.got_file.emit(path)
+
+    def flush(self):
+        if self.events:
+            self.got_file.emit(self.events[-1])
+            self.events = []
+
+
 def main(args=sys.argv):
     # Ensure viewer can continue to function if GUI is closed
     os.environ.pop('CALIBRE_WORKER_TEMP_DIR', None)
     reset_base_dir()
+    if iswindows:
+        # Ensure that all ebook editor instances are grouped together in the task
+        # bar. This prevents them from being grouped with viewer process when
+        # launched from within calibre, as both use calibre-parallel.exe
+        import ctypes
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('com.calibre-ebook.viewer')
+        except Exception:
+            pass  # Only available on windows 7 and newer
 
     parser = option_parser()
     opts, args = parser.parse_args(args)
     open_at = float(opts.open_at.replace(',', '.')) if opts.open_at else None
     listener = None
     override = 'calibre-ebook-viewer' if islinux else None
+    acc = EventAccumulator()
     app = Application(args, override_program_name=override, color_prefs=vprefs)
+    app.file_event_hook = acc
     app.load_builtin_fonts()
     app.setWindowIcon(QIcon(I('viewer.png')))
-    QApplication.setOrganizationName(ORG_NAME)
-    QApplication.setApplicationName(APP_UID)
 
     if vprefs['singleinstance']:
         try:
@@ -1180,7 +1251,7 @@ def main(args=sys.argv):
 
     main = EbookViewer(args[1] if len(args) > 1 else None,
             debug_javascript=opts.debug_javascript, open_at=open_at, continue_reading=opts.continue_reading,
-                       start_in_fullscreen=opts.full_screen, listener=listener)
+                       start_in_fullscreen=opts.full_screen, listener=listener, file_events=acc)
     app.installEventFilter(main)
     # This is needed for paged mode. Without it, the first document that is
     # loaded will have extra blank space at the bottom, as

@@ -23,19 +23,23 @@ from calibre.ebooks.metadata.toc import TOC
 from calibre.ebooks.metadata import MetaInformation
 from calibre.web.feeds import feed_from_xml, templates, feeds_from_index, Feed
 from calibre.web.fetch.simple import option_parser as web2disk_option_parser, RecursiveFetcher, AbortArticle
+from calibre.web.fetch.utils import prepare_masthead_image
 from calibre.utils.threadpool import WorkRequest, ThreadPool, NoResultsPending
 from calibre.ptempfile import PersistentTemporaryFile
 from calibre.utils.date import now as nowf
 from calibre.utils.icu import numeric_sort_key
-from calibre.utils.magick.draw import save_cover_data_to, add_borders_to_image
+from calibre.utils.img import save_cover_data_to, add_borders_to_image, image_to_data
 from calibre.utils.localization import canonicalize_lang
 from calibre.utils.logging import ThreadSafeWrapper
+
 
 class LoginFailed(ValueError):
     pass
 
+
 class DownloadDenied(ValueError):
     pass
+
 
 class BasicNewsRecipe(Recipe):
     '''
@@ -161,6 +165,8 @@ class BasicNewsRecipe(Recipe):
     #: It will be inserted into `<style>` tags, just before the closing
     #: `</head>` tag thereby overriding all :term:`CSS` except that which is
     #: declared using the style attribute on individual :term:`HTML` tags.
+    #: Note that if you want to programmatically generate the extra_css override
+    #: the :meth:`get_extra_css()` method instead.
     #: For example::
     #:
     #:     extra_css = '.heading { font: serif x-large }'
@@ -398,6 +404,13 @@ class BasicNewsRecipe(Recipe):
         :param tag: The Tag from which the URL was derived
         '''
         raise NotImplementedError
+
+    def get_extra_css(self):
+        '''
+        By default returns `self.extra_css`. Override if you want to programmatically generate the
+        extra_css.
+        '''
+        return self.extra_css
 
     def get_cover_url(self):
         '''
@@ -921,17 +934,17 @@ class BasicNewsRecipe(Recipe):
     def _postprocess_html(self, soup, first_fetch, job_info):
         if self.no_stylesheets:
             for link in soup.findAll('link'):
-                if (link.get('type') or '').lower() == 'text/css' and (link.get('rel') or '').lower() == 'stylesheet':
+                if (link.get('type') or 'text/css').lower() == 'text/css' and (link.get('rel') or 'stylesheet').lower() == 'stylesheet':
                     link.extract()
             for style in soup.findAll('style'):
-                soup.extract()
+                style.extract()
         head = soup.find('head')
         if not head:
             head = soup.find('body')
         if not head:
             head = soup.find(True)
         style = BeautifulSoup(u'<style type="text/css" title="override_css">%s</style>'%(
-            self.template_css +'\n\n'+(self.extra_css if self.extra_css else ''))).find('style')
+            self.template_css +'\n\n'+(self.get_extra_css() or ''))).find('style')
         head.insert(len(head.contents), style)
         if first_fetch and job_info:
             url, f, a, feed_len = job_info
@@ -941,7 +954,7 @@ class BasicNewsRecipe(Recipe):
                                              not self.has_single_feed,
                                              url, __appname__,
                                              center=self.center_navbar,
-                                             extra_css=self.extra_css)
+                                             extra_css=self.get_extra_css() or '')
                 elem = BeautifulSoup(templ.render(doctype='xhtml').decode('utf-8')).find('div')
                 body.insert(0, elem)
         if self.remove_javascript:
@@ -1020,7 +1033,7 @@ class BasicNewsRecipe(Recipe):
         templ = (templates.TouchscreenIndexTemplate if self.touchscreen else
                 templates.IndexTemplate)
         templ = templ(lang=self.lang_for_html)
-        css = self.template_css + '\n\n' +(self.extra_css if self.extra_css else '')
+        css = self.template_css + '\n\n' +(self.get_extra_css() or '')
         timefmt = self.timefmt
         return templ.generate(self.title, "mastheadImage.jpg", timefmt, feeds,
                               extra_css=css).render(doctype='xhtml')
@@ -1029,12 +1042,13 @@ class BasicNewsRecipe(Recipe):
     def description_limiter(cls, src):
         if not src:
             return ''
+        src = force_unicode(src, 'utf-8')
         pos = cls.summary_length
         fuzz = 50
-        si = src.find(';', pos)
+        si = src.find(u';', pos)
         if si > 0 and si-pos > fuzz:
             si = -1
-        gi = src.find('>', pos)
+        gi = src.find(u'>', pos)
         if gi > 0 and gi-pos > fuzz:
             gi = -1
         npos = max(si, gi)
@@ -1042,8 +1056,9 @@ class BasicNewsRecipe(Recipe):
             npos = pos
         ans = src[:npos+1]
         if len(ans) < len(src):
-            return (ans+u'\u2026') if isinstance(ans, unicode) else (ans +
-                    '...')
+            from calibre.utils.cleantext import clean_xml_chars
+            # Truncating the string could cause a dangling UTF-16 half-surrogate, which will cause lxml to barf, clean it
+            ans = clean_xml_chars(ans) + u'\u2026'
         return ans
 
     def feed2index(self, f, feeds):
@@ -1075,7 +1090,7 @@ class BasicNewsRecipe(Recipe):
         templ = (templates.TouchscreenFeedTemplate if self.touchscreen else
                     templates.FeedTemplate)
         templ = templ(lang=self.lang_for_html)
-        css = self.template_css + '\n\n' +(self.extra_css if self.extra_css else '')
+        css = self.template_css + '\n\n' +(self.get_extra_css() or '')
 
         return templ.generate(f, feeds, self.description_limiter,
                               extra_css=css).render(doctype='xhtml')
@@ -1224,7 +1239,9 @@ class BasicNewsRecipe(Recipe):
         for req in self.jobs:
             tp.putRequest(req, block=True, timeout=0)
 
-        self.report_progress(0, _('Starting download [%d thread(s)]...')%self.simultaneous_downloads)
+        self.report_progress(0, ngettext(
+            'Starting download in a single thread...',
+            'Starting download [{} threads]...', self.simultaneous_downloads).format(self.simultaneous_downloads))
         while True:
             try:
                 tp.poll()
@@ -1275,10 +1292,10 @@ class BasicNewsRecipe(Recipe):
             if not cdata:
                 return
             if self.cover_margins[0] or self.cover_margins[1]:
-                cdata = add_borders_to_image(cdata,
+                cdata = image_to_data(add_borders_to_image(cdata,
                             left=self.cover_margins[0],right=self.cover_margins[0],
                             top=self.cover_margins[1],bottom=self.cover_margins[1],
-                            border_color=self.cover_margins[2])
+                            border_color=self.cover_margins[2]))
 
             cpath = os.path.join(self.output_dir, 'cover.jpg')
             save_cover_data_to(cdata, cpath)
@@ -1374,22 +1391,7 @@ class BasicNewsRecipe(Recipe):
                 width=self.MI_WIDTH, height=self.MI_HEIGHT)
 
     def prepare_masthead_image(self, path_to_image, out_path):
-        from calibre import fit_image
-        from calibre.utils.magick import Image, create_canvas
-
-        img = Image()
-        img.open(path_to_image)
-        width, height = img.size
-        scaled, nwidth, nheight = fit_image(width, height, self.MI_WIDTH, self.MI_HEIGHT)
-        img2 = create_canvas(width, height)
-        frame = create_canvas(self.MI_WIDTH, self.MI_HEIGHT)
-        img2.compose(img)
-        if scaled:
-            img2.size = (nwidth, nheight, 'LanczosFilter', 0.5)
-        left = int((self.MI_WIDTH - nwidth)/2.0)
-        top = int((self.MI_HEIGHT - nheight)/2.0)
-        frame.compose(img2, left, top)
-        frame.save(out_path)
+        prepare_masthead_image(path_to_image, out_path, self.MI_WIDTH, self.MI_HEIGHT)
 
     def create_opf(self, feeds, dir=None):
         if dir is None:
@@ -1709,6 +1711,7 @@ class BasicNewsRecipe(Recipe):
                                 log.debug('Resolved internal URL: %s -> %s' % (url, arelpath))
                                 seen.add(url)
 
+
 class CustomIndexRecipe(BasicNewsRecipe):
 
     def custom_index(self):
@@ -1741,9 +1744,11 @@ class CustomIndexRecipe(BasicNewsRecipe):
         self.create_opf()
         return res
 
+
 class AutomaticNewsRecipe(BasicNewsRecipe):
 
     auto_cleanup = True
+
 
 class CalibrePeriodical(BasicNewsRecipe):
 
@@ -1796,4 +1801,3 @@ class CalibrePeriodical(BasicNewsRecipe):
         except:
             self.log.exception('Failed to compile downloaded recipe')
         return os.path.abspath('index.html')
-

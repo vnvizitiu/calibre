@@ -19,6 +19,7 @@ from calibre.utils.imghdr import what
 
 PLACEHOLDER_GIF = b'GIF89a\x01\x00\x01\x00\xf0\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00!\xfe calibre-placeholder-gif-for-azw3\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'  # noqa
 
+
 class Resources(object):
 
     def __init__(self, oeb, opts, is_periodical, add_fonts=False,
@@ -45,15 +46,14 @@ class Resources(object):
         try:
             return func(data)
         except Exception:
-            from calibre.utils.magick.draw import identify_data
-            if 'png' != identify_data(data)[-1].lower():
+            if 'png' != what(None, data):
                 raise
             with PersistentTemporaryFile(suffix='.png') as pt:
                 pt.write(data)
             try:
                 from calibre.utils.img import optimize_png
                 optimize_png(pt.name)
-                data = open(pt.name, 'rb').read()
+                data = lopen(pt.name, 'rb').read()
             finally:
                 os.remove(pt.name)
             return func(data)

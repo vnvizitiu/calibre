@@ -17,7 +17,8 @@ from calibre import as_unicode
 from calibre.constants import plugins
 from calibre.srv.loop import ServerLoop, HandleInterrupt, WRITE, READ, RDWR, Connection
 from calibre.srv.http_response import HTTPConnection, create_http_handler
-from calibre.srv.utils import DESIRED_SEND_BUFFER_SIZE, ReadOnlyFileBuffer
+from calibre.srv.utils import DESIRED_SEND_BUFFER_SIZE
+from calibre.utils.speedups import ReadOnlyFileBuffer
 speedup, err = plugins['speedup']
 if not speedup:
     raise RuntimeError('Failed to load speedup module with error: ' + err)
@@ -54,6 +55,7 @@ MESSAGE_TOO_BIG = 1009
 UNEXPECTED_ERROR = 1011
 
 RESERVED_CLOSE_CODES = (1004,1005,1006,)
+
 
 class ReadFrame(object):  # {{{
 
@@ -175,6 +177,7 @@ class ReadFrame(object):  # {{{
 
 # Sending frames {{{
 
+
 def create_frame(fin, opcode, payload, mask=None, rsv=0):
     if isinstance(payload, type('')):
         payload = payload.encode('utf-8')
@@ -234,6 +237,7 @@ class MessageWriter(object):
 
 conn_id = 0
 
+
 class UTF8Decoder(object):  # {{{
 
     def __init__(self):
@@ -247,6 +251,7 @@ class UTF8Decoder(object):  # {{{
         self.state = 0
         self.codep = 0
 # }}}
+
 
 class WebSocketConnection(HTTPConnection):
 
@@ -527,6 +532,7 @@ class DummyHandler(object):
 # Run this file with calibre-debug and use wstest to run the Autobahn test
 # suite
 
+
 class EchoHandler(object):
 
     def __init__(self, *args, **kwargs):
@@ -549,6 +555,7 @@ class EchoHandler(object):
 
     def handle_websocket_close(self, connection_id):
         self.ws_connections.pop(connection_id, None)
+
 
 def run_echo_server():
     s = ServerLoop(create_http_handler(websocket_handler=EchoHandler()))

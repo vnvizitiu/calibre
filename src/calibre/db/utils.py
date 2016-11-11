@@ -7,12 +7,14 @@ __license__ = 'GPL v3'
 __copyright__ = '2013, Kovid Goyal <kovid at kovidgoyal.net>'
 
 import os, errno, cPickle, sys, re
+from locale import localeconv
 from collections import OrderedDict, namedtuple
 from future_builtins import map
 from threading import Lock
 
 from calibre import as_unicode, prints
-from calibre.constants import cache_dir
+from calibre.constants import cache_dir, get_windows_number_formats, iswindows
+
 
 def force_to_bool(val):
     if isinstance(val, (str, unicode)):
@@ -32,6 +34,7 @@ def force_to_bool(val):
 
 _fuzzy_title_patterns = None
 
+
 def fuzzy_title_patterns():
     global _fuzzy_title_patterns
     if _fuzzy_title_patterns is None:
@@ -47,11 +50,13 @@ def fuzzy_title_patterns():
         )
     return _fuzzy_title_patterns
 
+
 def fuzzy_title(title):
     title = icu_lower(title.strip())
     for pat, repl in fuzzy_title_patterns():
         title = pat.sub(repl, title)
     return title
+
 
 def find_identical_books(mi, data):
     author_map, aid_map, title_map = data
@@ -78,8 +83,11 @@ def find_identical_books(mi, data):
 
 
 Entry = namedtuple('Entry', 'path size timestamp thumbnail_size')
+
+
 class CacheError(Exception):
     pass
+
 
 class ThumbnailCache(object):
 
@@ -128,6 +136,7 @@ class ThumbnailCache(object):
         self.total_size = 0
         self.items = OrderedDict()
         order = self._read_order()
+
         def listdir(*args):
             try:
                 return os.listdir(os.path.join(*args))
@@ -356,5 +365,22 @@ class ThumbnailCache(object):
             if hasattr(self, 'total_size'):
                 self._apply_size()
 
+number_separators = None
 
 
+def atof(string):
+    # Python 2.x does not handle unicode number separators correctly, so we
+    # have to implement our own
+    global number_separators
+    if number_separators is None:
+        if iswindows:
+            number_separators = get_windows_number_formats()
+        else:
+            lc = localeconv()
+            t, d = lc['thousands_sep'], lc['decimal_point']
+            if isinstance(t, bytes):
+                t = t.decode('utf-8', 'ignore') or ','
+            if isinstance(d, bytes):
+                d = d.decode('utf-8', 'ignore') or '.'
+            number_separators = t, d
+    return float(string.replace(number_separators[1], '.').replace(number_separators[0], ''))

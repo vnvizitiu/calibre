@@ -11,8 +11,8 @@ __all__ = [
         'build', 'mathjax',
         'gui',
         'develop', 'install',
-        'kakasi', 'coffee', 'rapydscript', 'cacerts', 'resources',
-        'check',
+        'kakasi', 'coffee', 'rapydscript', 'cacerts', 'recent_uas', 'resources',
+        'check', 'test',
         'sdist', 'bootstrap',
         'manual', 'tag_release',
         'pypi_register', 'pypi_upload', 'upload_to_server',
@@ -32,7 +32,7 @@ get_translations = GetTranslations()
 iso639 = ISO639()
 iso3166 = ISO3166()
 
-from setup.extensions import Build
+from setup.build import Build
 build = Build()
 
 from setup.mathjax import MathJax
@@ -50,11 +50,15 @@ gui = GUI()
 from setup.check import Check
 check = Check()
 
-from setup.resources import Resources, Kakasi, Coffee, CACerts, RapydScript
+from setup.test import Test
+test = Test()
+
+from setup.resources import Resources, Kakasi, Coffee, CACerts, RapydScript, RecentUAs
 resources = Resources()
 kakasi = Kakasi()
 coffee = Coffee()
 cacerts = CACerts()
+recent_uas = RecentUAs()
 rapydscript = RapydScript()
 
 from setup.publish import Manual, TagRelease, Stage1, Stage2, \

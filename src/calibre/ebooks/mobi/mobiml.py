@@ -14,9 +14,11 @@ from calibre.ebooks.oeb.base import XHTML, XHTML_NS, urlnormalize
 from calibre.ebooks.oeb.stylizer import Stylizer
 from calibre.ebooks.oeb.transforms.flatcss import KeyMapper
 from calibre.ebooks.mobi.utils import convert_color_for_font_tag
-from calibre.utils.magick.draw import identify_data
+from calibre.utils.imghdr import identify
 
 MBP_NS = 'http://mobipocket.com/ns/mbp'
+
+
 def MBP(name):
     return '{%s}%s' % (MBP_NS, name)
 
@@ -38,10 +40,12 @@ PAGE_BREAKS = set(['always', 'left', 'right'])
 
 COLLAPSE = re.compile(r'[ \t\r\n\v]+')
 
+
 def asfloat(value):
     if not isinstance(value, (int, long, float)):
         return 0.0
     return float(value)
+
 
 def isspace(text):
     if not text:
@@ -50,7 +54,9 @@ def isspace(text):
         return False
     return text.isspace()
 
+
 class BlockState(object):
+
     def __init__(self, body):
         self.body = body
         self.nested = []
@@ -63,7 +69,9 @@ class BlockState(object):
         self.istate = None
         self.content = False
 
+
 class FormatState(object):
+
     def __init__(self):
         self.rendered = False
         self.left = 0.
@@ -102,6 +110,7 @@ class FormatState(object):
 
 
 class MobiMLizer(object):
+
     def __init__(self, ignore_tables=False):
         self.ignore_tables = ignore_tables
 
@@ -445,8 +454,8 @@ class MobiMLizer(object):
                             href)
                 else:
                     try:
-                        width, height = identify_data(item.data)[:2]
-                    except:
+                        width, height = identify(item.data)[1:]
+                    except Exception:
                         self.oeb.logger.warn('Invalid image:', href)
                     else:
                         if 'width' not in istate.attrib and 'height' not in \
@@ -468,9 +477,13 @@ class MobiMLizer(object):
                                     pass
                                 istate.attrib['height'] = str(int(height))
                         item.unload_data_from_memory()
-        elif tag == 'hr' and asfloat(style['width']) > 0:
-            prop = style['width'] / self.profile.width
-            istate.attrib['width'] = "%d%%" % int(round(prop * 100))
+        elif tag == 'hr' and asfloat(style['width']) > 0 and style._get('width') not in {'100%', 'auto'}:
+            raww = style._get('width')
+            if hasattr(raww, 'strip') and '%' in raww:
+                istate.attrib['width'] = raww
+            else:
+                prop = style['width'] / self.profile.width
+                istate.attrib['width'] = "%d%%" % int(round(prop * 100))
         elif display == 'table':
             tag = 'table'
         elif display == 'table-row':

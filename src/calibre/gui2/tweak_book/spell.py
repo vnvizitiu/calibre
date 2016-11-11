@@ -42,11 +42,13 @@ DICTIONARY = 2
 
 _country_map = None
 
+
 def country_map():
     global _country_map
     if _country_map is None:
         _country_map = cPickle.loads(P('localization/iso3166.pickle', data=True, allow_user_override=False))
     return _country_map
+
 
 class AddDictionary(QDialog):  # {{{
 
@@ -126,6 +128,7 @@ class AddDictionary(QDialog):  # {{{
 # }}}
 
 # User Dictionaries {{{
+
 
 class UserWordList(QListWidget):
 
@@ -316,6 +319,7 @@ class ManageUserDictionaries(Dialog):
         l.addRow(bb)
         if d.exec_() != d.Accepted:
             return
+        d.loc.update_recently_used()
         word = unicode(w.text())
         lang = (loc.lang_codes or [canonicalize_lang(get_lang())])[0]
         if not word:
@@ -360,7 +364,7 @@ class ManageUserDictionaries(Dialog):
         words = set(filter(None, [x.strip() for x in unicode(w.toPlainText()).splitlines()]))
         lang = lc[0]
         words = {(w, lang) for w in words} - self.current_dictionary.words
-        if dictionaries.add_to_user_dictionary(self.current_dictionary.name, words, None):
+        if dictionaries.add_to_user_dictionary(self.current_dictionary.name, words, DictionaryLocale(lang, None)):
             dictionaries.clear_caches()
             self.show_current_dictionary()
             self.dictionaries_changed = True
@@ -586,6 +590,8 @@ class ManageDictionaries(Dialog):  # {{{
 # }}}
 
 # Spell Check Dialog {{{
+
+
 class WordsModel(QAbstractTableModel):
 
     word_ignored = pyqtSignal(object, object)
@@ -668,6 +674,7 @@ class WordsModel(QAbstractTableModel):
     def sort_key(self, col):
         if col == 0:
             f = (lambda x: x) if tprefs['spell_check_case_sensitive_sort'] else primary_sort_key
+
             def key(w):
                 return f(w[0])
         elif col == 1:
@@ -751,7 +758,10 @@ class WordsModel(QAbstractTableModel):
     def replace_word(self, w, new_word):
         # Hack to deal with replacement words that are actually multiple words,
         # ignore all words except the first
-        new_word = split_into_words(new_word)[0]
+        try:
+            new_word = split_into_words(new_word)[0]
+        except IndexError:
+            new_word = ''
         for location in self.words[w]:
             location.replace(new_word)
         if w[0] == new_word:
@@ -800,11 +810,13 @@ class WordsModel(QAbstractTableModel):
         except ValueError:
             return -1
 
+
 class WordsView(QTableView):
 
     ignore_all = pyqtSignal()
     add_all = pyqtSignal(object)
     change_to = pyqtSignal(object, object)
+    current_changed = pyqtSignal(object, object)
 
     def __init__(self, parent=None):
         QTableView.__init__(self, parent)
@@ -818,11 +830,11 @@ class WordsView(QTableView):
             self.copy_to_clipboard()
             ev.accept()
             return
+        before = self.currentIndex()
         ret = QTableView.keyPressEvent(self, ev)
-        if ev.key() in (Qt.Key_PageUp, Qt.Key_PageDown, Qt.Key_Up, Qt.Key_Down):
-            idx = self.currentIndex()
-            if idx.isValid():
-                self.scrollTo(idx)
+        after = self.currentIndex()
+        if after.row() != before.row() and after.isValid():
+            self.scrollTo(after)
         return ret
 
     def highlight_row(self, row):
@@ -862,6 +874,14 @@ class WordsView(QTableView):
         words = sorted({w[0] for w in words}, key=sort_key)
         if words:
             QApplication.clipboard().setText('\n'.join(words))
+
+    def currentChanged(self, cur, prev):
+        self.current_changed.emit(cur, prev)
+
+    @property
+    def current_word(self):
+        return self.model().word_for_row(self.currentIndex().row())
+
 
 class SpellCheck(Dialog):
 
@@ -936,7 +956,7 @@ class SpellCheck(Dialog):
         w.add_all.connect(self.add_all)
         w.activated.connect(self.word_activated)
         w.change_to.connect(self.change_to)
-        w.currentChanged = self.current_word_changed
+        w.current_changed.connect(self.current_word_changed)
         state = tprefs.get(self.state_name, None)
         hh = self.words_view.horizontalHeader()
         h.addWidget(w)
@@ -969,7 +989,7 @@ class SpellCheck(Dialog):
         self.user_dictionaries_missing_label = la = QLabel(_(
             'You have no active user dictionaries. You must'
             ' choose at least one active user dictionary via'
-            ' Preferences->Editor->Manage spelling dictionaries'))
+            ' Preferences->Editor->Manage spelling dictionaries'), self)
         la.setWordWrap(True)
         self.initialize_user_dictionaries()
         d.setMinimumContentsLength(25)
@@ -1121,6 +1141,8 @@ class SpellCheck(Dialog):
             self.word_replaced.emit(changed_files)
             w = self.words_model.replace_word(w, new_word)
             row = self.words_model.row_for_word(w)
+            if row == -1:
+                row = self.words_view.currentIndex().row()
             if row > -1:
                 self.words_view.highlight_row(row)
 
@@ -1216,6 +1238,8 @@ class SpellCheck(Dialog):
         self.words_model.clear()
 
     def work_done(self, words, spell_map, change_request):
+        row = self.words_view.rowAt(5)
+        before_word = self.words_view.current_word
         self.end_work()
         if not isinstance(words, dict):
             return error_dialog(self, _('Failed to check spelling'), _(
@@ -1224,15 +1248,20 @@ class SpellCheck(Dialog):
         if not self.isVisible():
             return
         self.words_model.set_data(words, spell_map)
+        wrow = self.words_model.row_for_word(before_word)
+        if 0 <= wrow < self.words_model.rowCount():
+            row = wrow
+        if row < 0 or row >= self.words_model.rowCount():
+            row = 0
         col, reverse = self.words_model.sort_on
         self.words_view.horizontalHeader().setSortIndicator(
             col, Qt.DescendingOrder if reverse else Qt.AscendingOrder)
-        self.words_view.highlight_row(0)
         self.update_summary()
         self.initialize_user_dictionaries()
         if self.words_model.rowCount() > 0:
             self.words_view.resizeRowToContents(0)
             self.words_view.verticalHeader().setDefaultSectionSize(self.words_view.rowHeight(0))
+        self.words_view.highlight_row(row)
         if change_request is not None:
             w, new_word = change_request
             if w in self.words_model.words:
@@ -1273,6 +1302,8 @@ class SpellCheck(Dialog):
 # }}}
 
 # Find next occurrence  {{{
+
+
 def find_next(word, locations, current_editor, current_editor_name,
               gui_parent, show_editor, edit_file):
     files = OrderedDict()
@@ -1305,6 +1336,7 @@ def find_next(word, locations, current_editor, current_editor_name,
             show_editor(file_name)
             return True
     return False
+
 
 def find_next_error(current_editor, current_editor_name, gui_parent, show_editor, edit_file):
     files = get_checkable_file_names(current_container())[0]

@@ -616,7 +616,7 @@ newer. Just add the file to calibre and click convert (make sure you are running
 the latest version of calibre as support for ``.docx`` files is very new).
 
 .. note::
-    There is a `demo .docx file <http://calibre-ebook.com/downloads/demos/demo.docx>`_
+    There is a `demo .docx file <https://calibre-ebook.com/downloads/demos/demo.docx>`_
     that demonstrates the capabilities of the calibre conversion engine. Just
     download it and convert it to EPUB or AZW3 to see what calibre can do.
 
@@ -846,7 +846,8 @@ _SECTION_ is replaced by whatever the name of the current section is. These
 names are taken from the metadata Table of Contents in the document (the PDF
 Outline). If the document has no table of contents then it will be replaced by
 empty text. If a single PDF page has multiple sections, the first section on
-the page will be used.
+the page will be used. Similarly, there is a variable named _TOP_LEVEL_SECTION_
+that can be used to get the name of the current top-level section.
 
 You can even use javascript inside the header and footer templates, for
 example, the following template will cause page numbers to start at 4 instead

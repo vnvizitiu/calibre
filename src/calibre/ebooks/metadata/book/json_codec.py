@@ -15,14 +15,17 @@ from calibre import isbytestring
 
 # Translate datetimes to and from strings. The string form is the datetime in
 # UTC. The returned date is also UTC
+
+
 def string_to_datetime(src):
-    from calibre.utils.date import parse_date
+    from calibre.utils.iso8601 import parse_iso8601
     if src != "None":
         try:
-            return parse_date(src)
+            return parse_iso8601(src)
         except Exception:
             pass
     return None
+
 
 def datetime_to_string(dateval):
     from calibre.utils.date import isoformat, UNDEFINED_DATE, local_tz
@@ -36,23 +39,24 @@ def datetime_to_string(dateval):
         return "None"
     return isoformat(dateval)
 
+
 def encode_thumbnail(thumbnail):
     '''
     Encode the image part of a thumbnail, then return the 3 part tuple
     '''
-    from calibre.utils.magick import Image
-
+    from calibre.utils.imghdr import identify
     if thumbnail is None:
         return None
     if not isinstance(thumbnail, (tuple, list)):
         try:
-            img = Image()
-            img.load(thumbnail)
-            width, height = img.size
+            width, height = identify(bytes(thumbnail))[1:]
+            if width < 0 or height < 0:
+                return None
             thumbnail = (width, height, thumbnail)
-        except:
+        except Exception:
             return None
     return (thumbnail[0], thumbnail[1], b64encode(str(thumbnail[2])))
+
 
 def decode_thumbnail(tup):
     '''
@@ -62,6 +66,7 @@ def decode_thumbnail(tup):
         return None
     return (tup[0], tup[1], b64decode(tup[2]))
 
+
 def object_to_unicode(obj, enc=preferred_encoding):
 
     def dec(x):
@@ -70,7 +75,7 @@ def object_to_unicode(obj, enc=preferred_encoding):
     if isbytestring(obj):
         return dec(obj)
     if isinstance(obj, (list, tuple)):
-        return [dec(x) if isbytestring(x) else x for x in obj]
+        return [dec(x) if isbytestring(x) else object_to_unicode(x) for x in obj]
     if isinstance(obj, dict):
         ans = {}
         for k, v in obj.items():
@@ -79,6 +84,7 @@ def object_to_unicode(obj, enc=preferred_encoding):
             ans[k] = v
         return ans
     return obj
+
 
 def encode_is_multiple(fm):
     if fm.get('is_multiple', None):
@@ -92,6 +98,7 @@ def encode_is_multiple(fm):
     else:
         fm['is_multiple'] = None
         fm['is_multiple2'] = {}
+
 
 def decode_is_multiple(fm):
     im = fm.get('is_multiple2',  None)
@@ -115,6 +122,7 @@ def decode_is_multiple(fm):
         elif im is None:
             im = {}
         fm['is_multiple'] = im
+
 
 class JsonCodec(object):
 

@@ -27,6 +27,7 @@ if iswindows and hasattr(sys, 'frozen'):
 if (islinux or isbsd) and getattr(sys, 'frozen', False):
     PDFTOHTML = os.path.join(sys.executables_location, 'bin', 'pdftohtml')
 
+
 def pdftohtml(output_dir, pdf_path, no_images, as_xml=False):
     '''
     Convert the pdf into html using the pdftohtml app.
@@ -55,7 +56,7 @@ def pdftohtml(output_dir, pdf_path, no_images, as_xml=False):
                 unicode) else PDFTOHTML
 
         cmd = [exe, b'-enc', b'UTF-8', b'-noframes', b'-p', b'-nomerge',
-                b'-nodrm', b'-q', a(pdfsrc), a(index)]
+                b'-nodrm', a(pdfsrc), a(index)]
 
         if isbsd:
             cmd.remove(b'-nodrm')
@@ -123,6 +124,7 @@ def pdftohtml(output_dir, pdf_path, no_images, as_xml=False):
         except:
             pass
 
+
 def parse_outline(raw, output_dir):
     from lxml import etree
     from calibre.ebooks.oeb.parse_utils import RECOVER_PARSER
@@ -151,14 +153,13 @@ def parse_outline(raw, output_dir):
 
 
 def flip_image(img, flip):
-    from calibre.utils.magick import Image
-    im = Image()
-    im.open(img)
-    if b'x' in flip:
-        im.flip(True)
-    if b'y' in flip:
-        im.flip()
-    im.save(img)
+    from calibre.utils.img import flip_image, image_and_format_from_data, image_to_data
+    with lopen(img, 'r+b') as f:
+        img, fmt = image_and_format_from_data(f.read())
+        img = flip_image(img, horizontal=b'x' in flip, vertical=b'y' in flip)
+        f.seek(0), f.truncate()
+        f.write(image_to_data(img, fmt=fmt))
+
 
 def flip_images(raw):
     for match in re.finditer(b'<IMG[^>]+/?>', raw, flags=re.I):

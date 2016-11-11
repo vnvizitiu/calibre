@@ -13,7 +13,8 @@ from lxml import etree
 
 from calibre.ebooks.docx.container import DOCX
 from calibre.ebooks.docx.writer.container import update_doc_props, xml2str
-from calibre.utils.magick.draw import identify_data
+from calibre.utils.imghdr import identify
+
 
 def get_cover(docx):
     doc = docx.document
@@ -26,11 +27,14 @@ def get_cover(docx):
         if rid in rid_map:
             try:
                 raw = docx.read(rid_map[rid])
-                width, height, fmt = identify_data(raw)
+                fmt, width, height = identify(bytes(raw))
             except Exception:
+                continue
+            if width < 0 or height < 0:
                 continue
             if 0.8 <= height/width <= 1.8 and height*width >= 160000:
                 return (fmt, raw)
+
 
 def get_metadata(stream):
     c = DOCX(stream, extract=False)
@@ -47,6 +51,7 @@ def get_metadata(stream):
         mi.cover_data = cdata
 
     return mi
+
 
 def set_metadata(stream, mi):
     from calibre.utils.zipfile import safe_replace

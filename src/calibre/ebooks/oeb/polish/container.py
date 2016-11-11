@@ -24,6 +24,8 @@ from calibre.ebooks.chardet import xml_to_unicode
 from calibre.ebooks.conversion.plugins.epub_input import (
     ADOBE_OBFUSCATION, IDPF_OBFUSCATION, decrypt_font_data)
 from calibre.ebooks.conversion.preprocess import HTMLPreProcessor, CSSPreProcessor as cssp
+from calibre.ebooks.metadata.opf3 import read_prefixes, items_with_property, ensure_prefix, CALIBRE_PREFIX
+from calibre.ebooks.metadata.utils import parse_opf_version
 from calibre.ebooks.mobi import MobiError
 from calibre.ebooks.mobi.reader.headers import MetadataHeader
 from calibre.ebooks.mobi.tweak import set_cover
@@ -46,10 +48,12 @@ exists, join, relpath = os.path.exists, os.path.join, os.path.relpath
 OEB_FONTS = {guess_type('a.ttf'), guess_type('b.otf'), guess_type('a.woff'), 'application/x-font-ttf', 'application/x-font-otf', 'application/font-sfnt'}
 OPF_NAMESPACES = {'opf':OPF2_NS, 'dc':DC11_NS}
 
+
 class CSSPreProcessor(cssp):
 
     def __call__(self, data):
         return self.MS_PAT.sub(self.ms_sub, data)
+
 
 def clone_dir(src, dest):
     ' Clone a directory using hard links for the files, dest must already exist '
@@ -65,6 +69,7 @@ def clone_dir(src, dest):
             except:
                 shutil.copy2(spath, dpath)
 
+
 def clone_container(container, dest_dir):
     ' Efficiently clone a container using hard links '
     dest_dir = os.path.abspath(os.path.realpath(dest_dir))
@@ -74,11 +79,14 @@ def clone_container(container, dest_dir):
         return cls(None, None, container.log, clone_data=clone_data)
     return cls(None, container.log, clone_data=clone_data)
 
+
 def name_to_abspath(name, root):
     return os.path.abspath(join(root, *name.split('/')))
 
+
 def abspath_to_name(path, root):
     return relpath(os.path.abspath(path), root).replace(os.sep, '/')
+
 
 def name_to_href(name, root, base=None, quote=urlquote):
     fullpath = name_to_abspath(name, root)
@@ -86,9 +94,13 @@ def name_to_href(name, root, base=None, quote=urlquote):
     path = relpath(fullpath, basepath).replace(os.sep, '/')
     return quote(path)
 
+
 def href_to_name(href, root, base=None):
     base = root if base is None else os.path.dirname(name_to_abspath(base, root))
-    purl = urlparse(href)
+    try:
+        purl = urlparse(href)
+    except ValueError:
+        return None
     if purl.scheme or not purl.path:
         return None
     href = urlunquote(purl.path)
@@ -99,6 +111,7 @@ def href_to_name(href, root, base=None):
         return None
     fullpath = os.path.join(base, *href.split('/'))
     return abspath_to_name(fullpath, root)
+
 
 class ContainerBase(object):  # {{{
     '''
@@ -124,6 +137,8 @@ class ContainerBase(object):  # {{{
         ans = guess_type(name)
         if ans == 'text/html':
             ans = 'application/xhtml+xml'
+        if ans in {'application/x-font-truetype', 'application/vnd.ms-opentype'} and self.opf_version_parsed[:2] > (3, 0):
+            return 'application/font-sfnt'
         return ans
 
     def decode(self, data, normalize_to_nfc=True):
@@ -185,6 +200,7 @@ class ContainerBase(object):  # {{{
         return parse_css(data, fname=fname, is_declaration=is_declaration, decode=self.decode, log_level=logging.WARNING,
                          css_preprocessor=(None if self.tweak_mode else self.css_preprocessor))
 # }}}
+
 
 class Container(ContainerBase):  # {{{
 
@@ -280,7 +296,7 @@ class Container(ContainerBase):  # {{{
                 for name, path in self.name_path_map.iteritems()}
         }
 
-    def add_name_to_manifest(self, name):
+    def add_name_to_manifest(self, name, process_manifest_item=None):
         ' Add an entry to the manifest for a file with the specified name. Returns the manifest id. '
         all_ids = {x.get('id') for x in self.opf_xpath('//*[@id]')}
         c = 0
@@ -294,6 +310,8 @@ class Container(ContainerBase):  # {{{
                                     id=item_id, href=href)
         item.set('media-type', self.mime_map[name])
         self.insert_into_xml(manifest, item)
+        if process_manifest_item is not None:
+            process_manifest_item(item)
         self.dirty(self.opf_name)
         return item_id
 
@@ -303,35 +321,48 @@ class Container(ContainerBase):  # {{{
         all_hrefs = {x.get('href') for x in self.opf_xpath('//opf:manifest/opf:item[@href]')}
         return href in all_hrefs
 
-    def add_file(self, name, data, media_type=None, spine_index=None):
+    def add_file(self, name, data, media_type=None, spine_index=None, modify_name_if_needed=False, process_manifest_item=None):
         ''' Add a file to this container. Entries for the file are
         automatically created in the OPF manifest and spine
         (if the file is a text document) '''
-        if self.has_name(name):
-            raise ValueError('A file with the name %s already exists' % name)
         if '..' in name:
             raise ValueError('Names are not allowed to have .. in them')
-        href = self.name_to_href(name, self.opf_name)
         all_hrefs = {x.get('href') for x in self.opf_xpath('//opf:manifest/opf:item[@href]')}
-        if href in all_hrefs:
-            raise ValueError('An item with the href %s already exists in the manifest' % href)
+        href = self.name_to_href(name, self.opf_name)
+        if self.has_name(name) or href in all_hrefs:
+            if not modify_name_if_needed:
+                raise ValueError(('A file with the name %s already exists' % name) if self.has_name(name) else
+                                 ('An item with the href %s already exists in the manifest' % href))
+            base, ext = name.rpartition('.')[::2]
+            c = 0
+            while True:
+                c += 1
+                q = '%s-%d.%s' % (base, c, ext)
+                href = self.name_to_href(q, self.opf_name)
+                if not self.has_name(q) and href not in all_hrefs:
+                    name = q
+                    break
         path = self.name_to_abspath(name)
         base = os.path.dirname(path)
         if not os.path.exists(base):
             os.makedirs(base)
-        with open(path, 'wb') as f:
-            f.write(data)
+        with lopen(path, 'wb') as f:
+            if hasattr(data, 'read'):
+                shutil.copyfileobj(data, f)
+            else:
+                f.write(data)
         mt = media_type or self.guess_type(name)
         self.name_path_map[name] = path
         self.mime_map[name] = mt
         if self.ok_to_be_unmanifested(name):
-            return
-        item_id = self.add_name_to_manifest(name)
+            return name
+        item_id = self.add_name_to_manifest(name, process_manifest_item=process_manifest_item)
         if mt in OEB_DOCS:
             manifest = self.opf_xpath('//opf:manifest')[0]
             spine = self.opf_xpath('//opf:spine')[0]
             si = manifest.makeelement(OPF('itemref'), idref=item_id)
             self.insert_into_xml(spine, si, index=spine_index)
+        return name
 
     def rename(self, current_name, new_name):
         ''' Renames a file from current_name to new_name. It automatically
@@ -453,7 +484,7 @@ class Container(ContainerBase):  # {{{
         return name_to_abspath(name, self.root)
 
     def exists(self, name):
-        ''' True iff a file corresponding to the canonical name exists. Note
+        ''' True iff a file/directory corresponding to the canonical name exists. Note
         that this function suffers from the limitations of the underlying OS
         filesystem, in particular case (in)sensitivity. So on a case
         insensitive filesystem this will return True even if the case of name
@@ -576,6 +607,11 @@ class Container(ContainerBase):  # {{{
             return ''
 
     @property
+    def opf_version_parsed(self):
+        ' The version set on the OPF\'s <package> element as a tuple of integers '
+        return parse_opf_version(self.opf_version)
+
+    @property
     def manifest_id_map(self):
         ' Mapping of manifest id to canonical names '
         return {item.get('id'):self.href_to_name(item.get('href'), self.opf_name)
@@ -589,6 +625,59 @@ class Container(ContainerBase):  # {{{
             ans[item.get('media-type').lower()].append(self.href_to_name(
                 item.get('href'), self.opf_name))
         return {mt:tuple(v) for mt, v in ans.iteritems()}
+
+    def manifest_items_with_property(self, property_name):
+        ' All manifest items that have the specified property '
+        prefixes = read_prefixes(self.opf)
+        for item in items_with_property(self.opf, property_name, prefixes):
+            href = item.get('href')
+            if href:
+                yield self.href_to_name(item.get('href'), self.opf_name)
+
+    def manifest_items_of_type(self, predicate):
+        ''' The names of all manifest items whose media-type matches predicate.
+        `predicate` can be a set, a list, a string or a function taking a single
+        argument, which will be called with the media-type. '''
+        if isinstance(predicate, type('')):
+            predicate = predicate.__eq__
+        elif hasattr(predicate, '__contains__'):
+            predicate = predicate.__contains__
+        for mt, names in self.manifest_type_map.iteritems():
+            if predicate(mt):
+                for name in names:
+                    yield name
+
+    def apply_unique_properties(self, name, *properties):
+        ''' Ensure that the specified properties are set on only the manifest item
+        identified by name. You can pass None as the name to remove the
+        property from all items. '''
+        properties = frozenset(properties)
+        removed_names, added_names = [], []
+        for p in properties:
+            if p.startswith('calibre:'):
+                ensure_prefix(self.opf, None, 'calibre', CALIBRE_PREFIX)
+                break
+
+        for item in self.opf_xpath('//opf:manifest/opf:item'):
+            iname = self.href_to_name(item.get('href'), self.opf_name)
+            props = (item.get('properties') or '').split()
+            lprops = {p.lower() for p in props}
+            for prop in properties:
+                if prop.lower() in lprops:
+                    if name != iname:
+                        removed_names.append(iname)
+                        props = [p for p in props if p.lower() != prop]
+                        if props:
+                            item.set('properties', ' '.join(props))
+                        else:
+                            del item.attrib['properties']
+                else:
+                    if name == iname:
+                        added_names.append(iname)
+                        props.append(prop)
+                        item.set('properties', ' '.join(props))
+        self.dirty(self.opf_name)
+        return removed_names, added_names
 
     @property
     def guide_type_map(self):
@@ -930,8 +1019,11 @@ class Container(ContainerBase):  # {{{
 # }}}
 
 # EPUB {{{
+
+
 class InvalidEpub(InvalidBook):
     pass
+
 
 class ObfuscationKeyMissing(InvalidEpub):
     pass
@@ -939,6 +1031,7 @@ class ObfuscationKeyMissing(InvalidEpub):
 OCF_NS = 'urn:oasis:names:tc:opendocument:xmlns:container'
 VCS_IGNORE_FILES = frozenset('.gitignore .hgignore .agignore .bzrignore'.split())
 VCS_DIRS = frozenset(('.git', '.hg', '.svn', '.bzr'))
+
 
 def walk_dir(basedir):
     for dirpath, dirnames, filenames in os.walk(basedir):
@@ -952,6 +1045,7 @@ def walk_dir(basedir):
         for fname in filenames:
             if fname not in VCS_IGNORE_FILES:
                 yield is_root, dirpath, fname
+
 
 class EpubContainer(Container):
 
@@ -1121,7 +1215,7 @@ class EpubContainer(Container):
                     break
         if raw_unique_identifier is not None:
             idpf_key = raw_unique_identifier
-            idpf_key = re.sub(u'\u0020\u0009\u000d\u000a', u'', idpf_key)
+            idpf_key = re.sub(u'[\u0020\u0009\u000d\u000a]', u'', idpf_key)
             idpf_key = hashlib.sha1(idpf_key.encode('utf-8')).digest()
         key = None
         for item in self.opf_xpath('//*[local-name()="metadata"]/*'
@@ -1203,6 +1297,7 @@ class EpubContainer(Container):
     def path_to_ebook(self):
         def fget(self):
             return self.pathtoepub
+
         def fset(self, val):
             self.pathtoepub = val
         return property(fget=fget, fset=fset)
@@ -1210,13 +1305,16 @@ class EpubContainer(Container):
 # }}}
 
 # AZW3 {{{
+
+
 class InvalidMobi(InvalidBook):
     pass
+
 
 def do_explode(path, dest):
     from calibre.ebooks.mobi.reader.mobi6 import MobiReader
     from calibre.ebooks.mobi.reader.mobi8 import Mobi8Reader
-    with open(path, 'rb') as stream:
+    with lopen(path, 'rb') as stream:
         mr = MobiReader(stream, default_log, None, None)
 
         with CurrentDir(dest):
@@ -1249,10 +1347,12 @@ def opf_to_azw3(opf, outpath, container):
     set_cover(oeb)
     outp.convert(oeb, outpath, inp, plumber.opts, container.log)
 
+
 def epub_to_azw3(epub, outpath=None):
     container = get_container(epub, tweak_mode=True)
     outpath = outpath or (epub.rpartition('.')[0] + '.azw3')
     opf_to_azw3(container.name_to_abspath(container.opf_name), outpath, container)
+
 
 class AZW3Container(Container):
 
@@ -1324,6 +1424,7 @@ class AZW3Container(Container):
     def path_to_ebook(self):
         def fget(self):
             return self.pathtoazw3
+
         def fset(self, val):
             self.pathtoazw3 = val
         return property(fget=fget, fset=fset)
@@ -1332,6 +1433,7 @@ class AZW3Container(Container):
     def names_that_must_not_be_changed(self):
         return set(self.name_path_map)
 # }}}
+
 
 def get_container(path, log=None, tdir=None, tweak_mode=False):
     if log is None:
@@ -1344,6 +1446,7 @@ def get_container(path, log=None, tdir=None, tweak_mode=False):
             else EpubContainer)(path, log, tdir=tdir)
     ebook.tweak_mode = tweak_mode
     return ebook
+
 
 def test_roundtrip():
     ebook = get_container(sys.argv[-1])
@@ -1358,5 +1461,3 @@ def test_roundtrip():
 
 if __name__ == '__main__':
     test_roundtrip()
-
-

@@ -18,6 +18,7 @@ from calibre.ebooks.oeb.transforms.subset import get_font_properties, find_font_
 from calibre.utils.filenames import ascii_filename
 from calibre.utils.fonts.scanner import font_scanner, NoFonts
 
+
 def used_font(style, embedded_fonts):
     ff = [unicode(f) for f in style.get('font-family', []) if unicode(f).lower() not in {
         'serif', 'sansserif', 'sans-serif', 'fantasy', 'cursive', 'monospace'}]
@@ -84,6 +85,7 @@ class EmbedFonts(object):
         self.parser = cssutils.CSSParser(loglevel=logging.CRITICAL, log=logging.getLogger('calibre.css'))
         self.warned = set()
         self.warned2 = set()
+        self.warned3 = set()
 
         for item in oeb.spine:
             if not hasattr(item.data, 'xpath'):
@@ -230,4 +232,11 @@ class EmbedFonts(object):
                 sheet = self.parser.parseString(css, validate=False)
                 page_sheet.data.insertRule(sheet.cssRules[0], len(page_sheet.data.cssRules))
                 return find_font_face_rules(sheet, self.oeb)[0]
-
+            else:
+                try:
+                    w = int(f['weight'])
+                except Exception:
+                    w = 200
+                if w % 100 and ((ff, w) not in self.warned3):
+                    self.warned3.add((ff, w))
+                    self.log.warn('The font %s has a non-standard weight: %s, it will not be embedded' % (ff, w))

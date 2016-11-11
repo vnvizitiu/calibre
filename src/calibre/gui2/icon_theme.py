@@ -6,21 +6,23 @@ from __future__ import (unicode_literals, division, absolute_import,
 __license__ = 'GPL v3'
 __copyright__ = '2015, Kovid Goyal <kovid at kovidgoyal.net>'
 
-import os, errno, json, importlib, math, httplib, bz2, shutil
+import os, errno, json, importlib, math, httplib, bz2, shutil, sys
+from itertools import count
 from io import BytesIO
 from future_builtins import map
 from Queue import Queue, Empty
-from threading import Thread
+from threading import Thread, Event
+from multiprocessing.pool import ThreadPool
 
 from PyQt5.Qt import (
     QImageReader, QFormLayout, QVBoxLayout, QSplitter, QGroupBox, QListWidget,
     QLineEdit, QSpinBox, QTextEdit, QSize, QListWidgetItem, QIcon, QImage,
     pyqtSignal, QStackedLayout, QWidget, QLabel, Qt, QComboBox, QPixmap,
     QGridLayout, QStyledItemDelegate, QModelIndex, QApplication, QStaticText,
-    QStyle, QPen
+    QStyle, QPen, QProgressDialog
 )
 
-from calibre import walk, fit_image, human_readable
+from calibre import walk, fit_image, human_readable, detect_ncpus as cpu_count
 from calibre.constants import cache_dir, config_dir
 from calibre.customize.ui import interface_actions
 from calibre.gui2 import must_use_qt, gprefs, choose_dir, error_dialog, choose_save_file, question_dialog
@@ -31,7 +33,7 @@ from calibre.utils.date import utcnow
 from calibre.utils.filenames import ascii_filename
 from calibre.utils.https import get_https_resource_securely, HTTPError
 from calibre.utils.icu import numeric_sort_key as sort_key
-from calibre.utils.magick import create_canvas, Image
+from calibre.utils.img import image_from_data, Canvas, optimize_png, optimize_jpeg
 from calibre.utils.zipfile import ZipFile, ZIP_STORED
 from calibre.utils.filenames import atomic_rename
 from lzma.xz import compress, decompress
@@ -45,11 +47,13 @@ BASE_URL = 'https://code.calibre-ebook.com/icon-themes/'
 
 COVER_SIZE = (340, 272)
 
+
 def render_svg(filepath):
     must_use_qt(headless=False)
     pngpath = filepath[:-4] + '.png'
     i = QImage(filepath)
     i.save(pngpath)
+
 
 def read_images_from_folder(path):
     name_map = {}
@@ -69,11 +73,13 @@ def read_images_from_folder(path):
             name_map[name] = filepath
     return name_map
 
+
 class Theme(object):
 
     def __init__(self, title='', author='', version=-1, description='', license='Unknown', url=None, cover=None):
         self.title, self.author, self.version, self.description = title, author, version, description
         self.license, self.cover, self.url = license, cover, url
+
 
 class Report(object):
 
@@ -84,6 +90,7 @@ class Report(object):
     @property
     def name(self):
         return ascii_filename(self.theme.title).replace(' ', '_').replace('.', '_').lower()
+
 
 def read_theme_from_folder(path):
     path = os.path.abspath(path)
@@ -105,6 +112,7 @@ def read_theme_from_folder(path):
     except ValueError:
         # Corrupted metadata file
         metadata = {}
+
     def safe_int(x):
         try:
             return int(x)
@@ -123,6 +131,7 @@ def read_theme_from_folder(path):
         theme.cover = create_cover(ans)
     return ans
 
+
 def icon_for_action(name):
     for plugin in interface_actions():
         if plugin.name == name:
@@ -132,6 +141,7 @@ def icon_for_action(name):
             icon = cls.action_spec[1]
             if icon:
                 return icon
+
 
 def default_cover_icons(cols=5):
     count = 0
@@ -150,31 +160,31 @@ def default_cover_icons(cols=5):
         del extra[0]
         count += 1
 
-def create_cover(report, icons=(), cols=5, size=60, padding=8):
+
+def create_cover(report, icons=(), cols=5, size=120, padding=16):
     icons = icons or tuple(default_cover_icons(cols))
     rows = int(math.ceil(len(icons) / cols))
-    canvas = create_canvas(cols * (size + padding), rows * (size + padding), '#eeeeee')
-    y = -size - padding // 2
-    x = 0
-    for i, icon in enumerate(icons):
-        if i % cols == 0:
-            y += padding + size
-            x = padding // 2
-        else:
-            x += size + padding
-        if report and icon in report.name_map:
-            ipath = os.path.join(report.path, report.name_map[icon])
-        else:
-            ipath = I(icon, allow_user_override=False)
-        img = Image()
-        with open(ipath, 'rb') as f:
-            img.load(f.read())
-        scaled, nwidth, nheight = fit_image(img.size[0], img.size[1], size, size)
-        img.size = nwidth, nheight
-        dx = (size - nwidth) // 2
-        canvas.compose(img, x + dx, y)
+    with Canvas(cols * (size + padding), rows * (size + padding), bgcolor='#eee') as canvas:
+        y = -size - padding // 2
+        x = 0
+        for i, icon in enumerate(icons):
+            if i % cols == 0:
+                y += padding + size
+                x = padding // 2
+            else:
+                x += size + padding
+            if report and icon in report.name_map:
+                ipath = os.path.join(report.path, report.name_map[icon])
+            else:
+                ipath = I(icon, allow_user_override=False)
+            with lopen(ipath, 'rb') as f:
+                img = image_from_data(f.read())
+            scaled, nwidth, nheight = fit_image(img.width(), img.height(), size, size)
+            img = img.scaled(nwidth, nheight, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+            dx = (size - nwidth) // 2
+            canvas.compose(img, x + dx, y)
+    return canvas.export()
 
-    return canvas.export('JPEG')
 
 def verify_theme(report):
     must_use_qt()
@@ -185,6 +195,7 @@ def verify_theme(report):
         if img.isNull():
             bad[name] = reader.errorString()
     return bool(bad)
+
 
 class ThemeCreateDialog(Dialog):
 
@@ -284,22 +295,106 @@ class ThemeCreateDialog(Dialog):
                 'You must specify an author for this icon theme'), show=True)
         return Dialog.accept(self)
 
-def create_themeball(report):
+
+class Compress(QProgressDialog):
+
+    update_signal = pyqtSignal(object, object)
+
+    def __init__(self, report, parent=None):
+        total = 2 + len(report.name_map)
+        QProgressDialog.__init__(self, _('Losslessly optimizing images, please wait...'), _('&Abort'), 0, total, parent)
+        self.setWindowTitle(self.labelText())
+        self.setWindowIcon(QIcon(I('lt.png')))
+        self.setMinimumDuration(0)
+        self.update_signal.connect(self.do_update, type=Qt.QueuedConnection)
+        self.raw = self.prefix = None
+        self.abort = Event()
+        self.canceled.connect(self.abort.set)
+        self.t = Thread(name='CompressIcons', target=self.run_compress, args=(report,))
+        self.t.daemon = False
+        self.t.start()
+
+    def do_update(self, num, message):
+        if num < 0:
+            return self.onerror(_('Optimizing images failed, click "Show details" for more information'), message)
+        self.setValue(num)
+        self.setLabelText(message)
+
+    def onerror(self, msg, details):
+        error_dialog(self, _('Compression failed'), msg, det_msg=details, show=True)
+        self.close()
+
+    def onprogress(self, num, msg):
+        self.update_signal.emit(num, msg)
+        return not self.wasCanceled()
+
+    def run_compress(self, report):
+        try:
+            self.raw, self.prefix = create_themeball(report, self.onprogress, self.abort)
+        except Exception:
+            import traceback
+            self.update_signal.emit(-1, traceback.format_exc())
+        else:
+            self.update_signal.emit(self.maximum(), '')
+
+
+def create_themeball(report, progress=None, abort=None):
+    pool = ThreadPool(processes=cpu_count())
     buf = BytesIO()
+    num = count()
+    error_occurred = Event()
+
+    def optimize(name):
+        if abort is not None and abort.is_set():
+            return
+        if error_occurred.is_set():
+            return
+        try:
+            i = next(num)
+            if progress is not None:
+                progress(i, _('Optimizing %s') % name)
+            srcpath = os.path.join(report.path, name)
+            ext = srcpath.rpartition('.')[-1].lower()
+            if ext == 'png':
+                optimize_png(srcpath)
+            elif ext in ('jpg', 'jpeg'):
+                optimize_jpeg(srcpath)
+        except Exception:
+            return sys.exc_info()
+
+    errors = tuple(filter(None, pool.map(optimize, tuple(report.name_map.iterkeys()))))
+    pool.close(), pool.join()
+    if abort is not None and abort.is_set():
+        return
+    if errors:
+        e = errors[0]
+        raise e[0], e[1], e[2]
+
+    if progress is not None:
+        progress(next(num), _('Creating theme file'))
     with ZipFile(buf, 'w') as zf:
-        for name, path in report.name_map.iteritems():
-            with open(os.path.join(report.path, name), 'rb') as f:
+        for name in report.name_map:
+            srcpath = os.path.join(report.path, name)
+            with lopen(srcpath, 'rb') as f:
                 zf.writestr(name, f.read(), compression=ZIP_STORED)
     buf.seek(0)
     out = BytesIO()
+    if abort is not None and abort.is_set():
+        return None, None
+    if progress is not None:
+        progress(next(num), _('Compressing theme file'))
     compress(buf, out, level=9)
     buf = BytesIO()
     prefix = report.name
+    if abort is not None and abort.is_set():
+        return None, None
     with ZipFile(buf, 'w') as zf:
-        with open(os.path.join(report.path, THEME_METADATA), 'rb') as f:
+        with lopen(os.path.join(report.path, THEME_METADATA), 'rb') as f:
             zf.writestr(prefix + '/' + THEME_METADATA, f.read())
         zf.writestr(prefix + '/' + THEME_COVER, create_cover(report))
         zf.writestr(prefix + '/' + 'icons.zip.xz', out.getvalue(), compression=ZIP_STORED)
+    if progress is not None:
+        progress(next(num), _('Finished'))
     return buf.getvalue(), prefix
 
 
@@ -314,17 +409,22 @@ def create_theme(folder=None, parent=None):
     if d.exec_() != d.Accepted:
         return
     d.save_metadata()
-    raw, prefix = create_themeball(d.report)
+    d = Compress(d.report, parent=parent)
+    d.exec_()
+    if d.wasCanceled() or d.raw is None:
+        return
+    raw, prefix = d.raw, d.prefix
     dest = choose_save_file(parent, 'create-icon-theme-dest', _(
         'Choose destination for icon theme'),
         [(_('ZIP files'), ['zip'])], initial_filename=prefix + '.zip')
     if dest:
-        with open(dest, 'wb') as f:
+        with lopen(dest, 'wb') as f:
             f.write(raw)
 
 # }}}
 
 # Choose Theme  {{{
+
 
 def download_cover(cover_url, etag=None, cached=b''):
     url = BASE_URL + cover_url
@@ -343,6 +443,7 @@ def download_cover(cover_url, etag=None, cached=b''):
             return cached, etag
         raise
 
+
 def get_cover(metadata):
     cdir = os.path.join(cache_dir(), 'icon-theme-covers')
     try:
@@ -350,9 +451,11 @@ def get_cover(metadata):
     except EnvironmentError as e:
         if e.errno != errno.EEXIST:
             raise
+
     def path(ext):
         return os.path.join(cdir, metadata['name'] + '.' + ext)
     etag_file, cover_file = map(path, 'etag jpg'.split())
+
     def safe_read(path):
         try:
             with open(path, 'rb') as f:
@@ -370,6 +473,7 @@ def get_cover(metadata):
         with open(etag_file, 'wb') as f:
             f.write(etag)
     return cached or b''
+
 
 def get_covers(themes, callback, num_of_workers=8):
     items = Queue()
@@ -395,6 +499,7 @@ def get_covers(themes, callback, num_of_workers=8):
         t.daemon = True
         t.start()
 
+
 class Delegate(QStyledItemDelegate):
 
     SPACING = 10
@@ -411,7 +516,7 @@ class Delegate(QStyledItemDelegate):
         pixmap = index.data(Qt.DecorationRole)
         if pixmap and not pixmap.isNull():
             rect = option.rect.adjusted(0, self.SPACING, COVER_SIZE[0] - option.rect.width(), - self.SPACING)
-            painter.drawPixmap(rect, pixmap, pixmap.rect())
+            painter.drawPixmap(rect, pixmap)
         if option.state & QStyle.State_Selected:
             painter.setPen(QPen(QApplication.instance().palette().highlightedText().color()))
         bottom = option.rect.bottom() - 2
@@ -430,6 +535,7 @@ class Delegate(QStyledItemDelegate):
         )))
         painter.drawStaticText(COVER_SIZE[0] + self.SPACING, option.rect.top() + self.SPACING, theme['static-text'])
         painter.restore()
+
 
 class DownloadProgress(ProgressDialog):
 
@@ -452,6 +558,7 @@ class DownloadProgress(ProgressDialog):
 
     def queue_reject(self):
         self.rej.emit()
+
 
 class ChooseTheme(Dialog):
 
@@ -488,13 +595,15 @@ class ChooseTheme(Dialog):
         v.addStretch(), v.addWidget(pi, 0, Qt.AlignCenter)
         self.wait_msg = m = QLabel(self)
         v.addWidget(m, 0, Qt.AlignCenter), v.addStretch()
-        m.setStyleSheet('QLabel { font-size: 40px; font-weight: bold }')
+        f = m.font()
+        f.setBold(True), f.setPointSize(28), m.setFont(f)
         self.start_spinner()
 
         l.addWidget(c)
         self.w = w = QWidget(self)
         l.addWidget(w)
         w.l = l = QGridLayout(w)
+
         def add_row(x, y=None):
             if isinstance(x, type('')):
                 x = QLabel(x)
@@ -602,8 +711,13 @@ class ChooseTheme(Dialog):
 
     def set_cover(self, theme, cdata):
         theme['cover-pixmap'] = p = QPixmap()
+        try:
+            dpr = self.devicePixelRatioF()
+        except AttributeError:
+            dpr = self.devicePixelRatio()
         if isinstance(cdata, bytes):
             p.loadFromData(cdata)
+            p.setDevicePixelRatio(dpr)
         item = self.item_from_name(theme['name'])
         if item is not None:
             item.setData(Qt.DecorationRole, p)
@@ -658,6 +772,7 @@ class ChooseTheme(Dialog):
         if ret == d.Rejected or not self.keep_downloading or d.canceled or self.downloaded_theme is None:
             return
         dt = self.downloaded_theme
+
         def commit_changes():
             dt.seek(0)
             f = decompress(dt)
@@ -669,6 +784,7 @@ class ChooseTheme(Dialog):
         return Dialog.accept(self)
 
 # }}}
+
 
 def remove_icon_theme():
     icdir = os.path.join(config_dir, 'resources', 'images')
@@ -688,11 +804,13 @@ def remove_icon_theme():
                 raise
     os.remove(metadata_file)
 
+
 def safe_copy(src, destpath):
     tpath = destpath + '-temp'
     with open(tpath, 'wb') as dest:
         shutil.copyfileobj(src, dest)
     atomic_rename(tpath, destpath)
+
 
 def install_icon_theme(theme, f):
     icdir = os.path.abspath(os.path.join(config_dir, 'resources', 'images'))

@@ -7,7 +7,7 @@ __license__   = 'GPL v3'
 __copyright__ = '2013, Kovid Goyal <kovid at kovidgoyal.net>'
 __docformat__ = 'restructuredtext en'
 
-import re, sys, os, time
+import re, sys, time
 from collections import namedtuple
 from functools import partial
 
@@ -37,6 +37,7 @@ ALL_OPTS = {
 
 CUSTOMIZATION = {
     'remove_unused_classes': False,
+    'merge_identical_selectors': False,
 }
 
 SUPPORTED = {'EPUB', 'AZW3'}
@@ -113,6 +114,7 @@ affecting image quality.</p>
 
 }
 
+
 def hfix(name, raw):
     if name == 'about':
         return raw.format('')
@@ -125,21 +127,17 @@ def hfix(name, raw):
 CLI_HELP = {x:hfix(x, re.sub('<.*?>', '', y)) for x, y in HELP.iteritems()}
 # }}}
 
-def update_metadata(ebook, new_opf):
-    from calibre.ebooks.metadata.opf2 import OPF
-    from calibre.ebooks.metadata.epub import update_metadata
-    opfpath = ebook.name_to_abspath(ebook.opf_name)
-    with ebook.open(ebook.opf_name, 'r+b') as stream, open(new_opf, 'rb') as ns:
-        opf = OPF(stream, basedir=os.path.dirname(opfpath), populate_spine=False,
-                  unquote_urls=False)
-        mi = OPF(ns, unquote_urls=False,
-                      populate_spine=False).to_book_metadata()
-        mi.cover, mi.cover_data = None, (None, None)
 
-        update_metadata(opf, mi, apply_null=True, update_timestamp=True)
+def update_metadata(ebook, new_opf):
+    from calibre.ebooks.metadata.opf import get_metadata, set_metadata
+    with ebook.open(ebook.opf_name, 'r+b') as stream, open(new_opf, 'rb') as ns:
+        mi = get_metadata(ns)[0]
+        mi.cover, mi.cover_data = None, (None, None)
+        opfbytes = set_metadata(stream, mi, apply_null=True, update_timestamp=True)[0]
         stream.seek(0)
         stream.truncate()
-        stream.write(opf.render())
+        stream.write(opfbytes)
+
 
 def polish_one(ebook, opts, report, customization=None):
     rt = lambda x: report('\n### ' + x)
@@ -207,7 +205,8 @@ def polish_one(ebook, opts, report, customization=None):
 
     if opts.remove_unused_css:
         rt(_('Removing unused CSS rules'))
-        if remove_unused_css(ebook, report, remove_unused_classes=customization['remove_unused_classes']):
+        if remove_unused_css(
+                ebook, report, remove_unused_classes=customization['remove_unused_classes'], merge_rules=customization['merge_identical_selectors']):
             changed = True
         report('')
 
@@ -232,6 +231,7 @@ def polish(file_map, opts, log, report):
 
 REPORT = '{0} REPORT {0}'.format('-'*30)
 
+
 def gui_polish(data):
     files = data.pop('files')
     if not data.pop('metadata'):
@@ -252,6 +252,7 @@ def gui_polish(data):
         log(msg)
     return '\n\n'.join(report)
 
+
 def tweak_polish(container, actions, customization=None):
     opts = ALL_OPTS.copy()
     opts.update(actions)
@@ -260,6 +261,7 @@ def tweak_polish(container, actions, customization=None):
     report = []
     changed = polish_one(container, opts, report.append, customization=customization)
     return report, changed
+
 
 def option_parser():
     from calibre.utils.config import OptionParser
@@ -284,6 +286,7 @@ def option_parser():
     o('--verbose', help=_('Produce more verbose output, useful for debugging.'))
 
     return parser
+
 
 def main(args=None):
     parser = option_parser()

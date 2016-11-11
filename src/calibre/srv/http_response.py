@@ -22,7 +22,8 @@ from calibre.srv.http_request import HTTPRequest, read_headers
 from calibre.srv.sendfile import file_metadata, sendfile_to_socket_async, CannotSendfile, SendfileInterrupted
 from calibre.srv.utils import (
     MultiDict, http_date, HTTP1, HTTP11, socket_errors_socket_closed,
-    sort_q_values, get_translator_for_lang, Cookie, ReadOnlyFileBuffer)
+    sort_q_values, get_translator_for_lang, Cookie)
+from calibre.utils.speedups import ReadOnlyFileBuffer
 from calibre.utils.monotonic import monotonic
 
 Range = namedtuple('Range', 'start stop size')
@@ -33,10 +34,12 @@ if zlib2_err:
     raise RuntimeError('Failed to laod the zlib2 module with error: ' + zlib2_err)
 del zlib2_err
 
+
 def header_list_to_file(buf):  # {{{
     buf.append('')
     return ReadOnlyFileBuffer(b''.join((x + '\r\n').encode('ascii') for x in buf))
 # }}}
+
 
 def parse_multipart_byterange(buf, content_type):  # {{{
     sep = (content_type.rsplit('=', 1)[-1]).encode('utf-8')
@@ -74,9 +77,11 @@ def parse_multipart_byterange(buf, content_type):  # {{{
     return ans
 # }}}
 
+
 def parse_if_none_match(val):  # {{{
     return {x.strip() for x in val.split(',')}
 # }}}
+
 
 def acceptable_encoding(val, allowed=frozenset({'gzip'})):  # {{{
     for x in sort_q_values(val):
@@ -84,6 +89,7 @@ def acceptable_encoding(val, allowed=frozenset({'gzip'})):  # {{{
         if x in allowed:
             return x
 # }}}
+
 
 def preferred_lang(val, get_translator_for_lang):  # {{{
     for x in sort_q_values(val):
@@ -93,6 +99,7 @@ def preferred_lang(val, get_translator_for_lang):  # {{{
             return x
     return 'en'
 # }}}
+
 
 def get_ranges(headervalue, content_length):  # {{{
     ''' Return a list of ranges from the Range header. If this function returns
@@ -138,6 +145,8 @@ def get_ranges(headervalue, content_length):  # {{{
 # }}}
 
 # gzip transfer encoding  {{{
+
+
 def gzip_prefix():
     # See http://www.gzip.org/zlib/rfc-gzip.html
     return b''.join((
@@ -149,6 +158,7 @@ def gzip_prefix():
         b'\x02',           # XFL: max compression, slowest algo
         b'\xff',           # OS: unknown
     ))
+
 
 def compress_readable_output(src_file, compress_level=6):
     crc = zlib.crc32(b"")
@@ -171,6 +181,7 @@ def compress_readable_output(src_file, compress_level=6):
     yield zobj.flush() + struct.pack(b"<L", crc) + struct.pack(b"<L", size)
 # }}}
 
+
 def get_range_parts(ranges, content_type, content_length):  # {{{
 
     def part(r):
@@ -182,6 +193,7 @@ def get_range_parts(ranges, content_type, content_length):  # {{{
     return list(map(part, ranges)) + [('--%s--' % MULTIPART_SEPARATOR).encode('ascii')]
 # }}}
 
+
 class ETaggedFile(object):  # {{{
 
     def __init__(self, output, etag):
@@ -190,6 +202,7 @@ class ETaggedFile(object):  # {{{
     def fileno(self):
         return self.output.fileno()
 # }}}
+
 
 class RequestData(object):  # {{{
 
@@ -270,6 +283,7 @@ class RequestData(object):  # {{{
             self.ngettext_func = t.ungettext
 # }}}
 
+
 class ReadableOutput(object):
 
     def __init__(self, output, etag=None, content_length=None):
@@ -284,6 +298,7 @@ class ReadableOutput(object):
         self.use_sendfile = False
         self.src_file.seek(0)
 
+
 def filesystem_file_output(output, outheaders, stat_result):
     etag = getattr(output, 'etag', None)
     if etag is None:
@@ -295,6 +310,7 @@ def filesystem_file_output(output, outheaders, stat_result):
     self.name = output.name
     self.use_sendfile = True
     return self
+
 
 def dynamic_output(output, outheaders, etag=None):
     if isinstance(output, bytes):
@@ -308,6 +324,7 @@ def dynamic_output(output, outheaders, etag=None):
     ans.accept_ranges = False
     return ans
 
+
 class ETaggedDynamicOutput(object):
 
     def __init__(self, func, etag):
@@ -315,6 +332,7 @@ class ETaggedDynamicOutput(object):
 
     def __call__(self):
         return self.func()
+
 
 class GeneratedOutput(object):
 
@@ -324,6 +342,7 @@ class GeneratedOutput(object):
         self.etag = etag
         self.accept_ranges = False
 
+
 class StaticOutput(object):
 
     def __init__(self, data):
@@ -332,6 +351,7 @@ class StaticOutput(object):
         self.data = data
         self.etag = '"%s"' % hashlib.sha1(data).hexdigest()
         self.content_length = len(data)
+
 
 class HTTPConnection(HTTPRequest):
 
@@ -681,6 +701,7 @@ class HTTPConnection(HTTPRequest):
             request.status_code = httplib.PARTIAL_CONTENT
         return output
 
+
 def create_http_handler(handler=None, websocket_handler=None):
     from calibre.srv.web_socket import WebSocketConnection
     static_cache = {}
@@ -689,6 +710,7 @@ def create_http_handler(handler=None, websocket_handler=None):
         def dummy_http_handler(data):
             return 'Hello'
         handler = dummy_http_handler
+
     @wraps(handler)
     def wrapper(*args, **kwargs):
         ans = WebSocketConnection(*args, **kwargs)

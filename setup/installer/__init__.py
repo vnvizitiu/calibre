@@ -15,8 +15,8 @@ from setup.build_environment import BUILD_HOST, PROJECT
 BASE_RSYNC = ['rsync', '-av', '--delete', '--force']
 EXCLUDES = []
 for x in [
-    '/src/calibre/plugins', '/manual', '/translations', '/build', '/dist', '/imgsrc', '/format_docs'
-    '.bzr', '.git', '.build', '.svn',  '*.pyc', '*.pyo', '*.swp', '*.swo',]:
+    '/src/calibre/plugins', '/manual', '/translations', '/build', '/dist', '/imgsrc', '/format_docs', '/.build-cache',
+    '.bzr', '.git', '.build', '.svn',  '*.pyc', '*.pyo', '*.swp', '*.swo', '*.pyj-cached']:
     EXCLUDES.extend(['--exclude', ('/calibre' + x) if x.startswith('/') else x])
 SAFE_EXCLUDES = ['"%s"'%x if '*' in x else x for x in EXCLUDES]
 

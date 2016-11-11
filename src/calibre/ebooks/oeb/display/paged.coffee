@@ -107,9 +107,14 @@ class PagedDisplay
     set_geometry: (cols_per_screen=1, margin_top=20, margin_side=40, margin_bottom=20) ->
         this.cols_per_screen = cols_per_screen
         if this.use_document_margins and this.document_margins != null
-            this.margin_top = this.document_margins.top or margin_top
-            this.margin_bottom = this.document_margins.bottom or margin_bottom
-            this.margin_side = this.document_margins.left or this.document_margins.right or margin_side
+            this.margin_top = if this.document_margins.top != null then this.document_margins.top else margin_top
+            this.margin_bottom = if this.document_margins.bottom != null then this.document_margins.bottom else margin_bottom
+            if this.document_margins.left != null
+                this.margin_side = this.document_margins.left
+            else if this.document_margins.right != null
+                this.margin_side = this.document_margins.right
+            else
+                this.margin_side = margin_side
             this.effective_margin_top = this.margin_top
             this.effective_margin_bottom = this.margin_bottom
         else
@@ -140,6 +145,13 @@ class PagedDisplay
             first_layout = true
             if not single_screen and this.cols_per_screen > 1
                 num = this.cols_per_screen - 1
+                elems = document.querySelectorAll('body > *')
+                if elems.length == 1
+                    # Workaround for the case when the content is wrapped in a
+                    # 100% height <div>. This causes the generated page divs to
+                    # not be in the correct location. See
+                    # https://bugs.launchpad.net/bugs/1594657 for an example.
+                    elems[0].style.height = 'auto'
                 while num > 0
                     num -= 1
                     create_page_div()
@@ -179,13 +191,8 @@ class PagedDisplay
         # above the columns, which causes them to effectively be added to the
         # page margins (the margin collapse algorithm)
         bs.setProperty('-webkit-margin-collapse', 'separate')
-        # Remove any webkit specified default margin from the first child of body
-        # Otherwise, you could end up with an effective negative margin, I dont
-        # understand exactly why, but see:
-        # https://bugs.launchpad.net/calibre/+bug/1082640 for an example
         c = first_child(document.body)
         if c != null
-            c.style.setProperty('-webkit-margin-before', '0')
             # Remove page breaks on the first few elements to prevent blank pages
             # at the start of a chapter
             c.style.setProperty('-webkit-column-break-before', 'avoid')
@@ -302,11 +309,12 @@ class PagedDisplay
             title = py_bridge.title()
             author = py_bridge.author()
             section = py_bridge.section()
+            tl_section = py_bridge.tl_section()
         if this.header != null
-            this.header.innerHTML = this.header_template.replace(/_PAGENUM_/g, pagenum+"").replace(/_TITLE_/g, title+"").replace(/_AUTHOR_/g, author+"").replace(/_SECTION_/g, section+"")
+            this.header.innerHTML = this.header_template.replace(/_PAGENUM_/g, pagenum+"").replace(/_TITLE_/g, title+"").replace(/_AUTHOR_/g, author+"").replace(/_TOP_LEVEL_SECTION_/g, tl_section+"").replace(/_SECTION_/g, section+"")
             runscripts(this.header)
         if this.footer != null
-            this.footer.innerHTML = this.footer_template.replace(/_PAGENUM_/g, pagenum+"").replace(/_TITLE_/g, title+"").replace(/_AUTHOR_/g, author+"").replace(/_SECTION_/g, section+"")
+            this.footer.innerHTML = this.footer_template.replace(/_PAGENUM_/g, pagenum+"").replace(/_TITLE_/g, title+"").replace(/_AUTHOR_/g, author+"").replace(/_TOP_LEVEL_SECTION_/g, tl_section+"").replace(/_SECTION_/g, section+"")
             runscripts(this.footer)
 
     fit_images: () ->

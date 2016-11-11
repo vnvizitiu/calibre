@@ -17,11 +17,12 @@ try:
 except ImportError:
     create_server_cert = None
 
-
 from calibre.srv.pre_activated import has_preactivated_support
 from calibre.srv.tests.base import BaseTest, TestServer
 from calibre.ptempfile import TemporaryDirectory
 from calibre.utils.monotonic import monotonic
+is_ci = os.environ.get('CI', '').lower() == 'true'
+
 
 class LoopTest(BaseTest):
 
@@ -56,15 +57,18 @@ class LoopTest(BaseTest):
     def test_plugins(self):
         'Test plugin semantics'
         class Plugin(object):
+
             def __init__(self):
                 self.running = Event()
                 self.event = Event()
                 self.port = None
+
             def start(self, loop):
                 self.running.set()
                 self.port = loop.bound_address[1]
                 self.event.wait()
                 self.running.clear()
+
             def stop(self):
                 self.event.set()
 
@@ -103,6 +107,7 @@ class LoopTest(BaseTest):
         with TestServer(lambda data:(data.path[0] + data.read()), listen_on='1.1.1.1', fallback_to_detected_interface=True, specialize=specialize) as server:
             self.assertNotEqual('1.1.1.1', server.address[0])
 
+    @skipIf(is_ci, 'Continuous Integration servers do not support BonJour')
     def test_bonjour(self):
         'Test advertising via BonJour'
         from calibre.srv.bonjour import BonJour
@@ -123,6 +128,7 @@ class LoopTest(BaseTest):
     def test_ring_buffer(self):
         'Test the ring buffer used for reads'
         class FakeSocket(object):
+
             def __init__(self, data):
                 self.data = data
 
@@ -132,8 +138,10 @@ class LoopTest(BaseTest):
                 return sz
         from calibre.srv.loop import ReadBuffer, READ, WRITE
         buf = ReadBuffer(100)
+
         def write(data):
             return buf.recv_from(FakeSocket(data))
+
         def set(data, rpos, wpos, state):
             buf.ba = bytearray(data)
             buf.buf = memoryview(buf.ba)
@@ -177,15 +185,13 @@ class LoopTest(BaseTest):
     @skipIf(create_server_cert is None, 'certgen module not available')
     def test_ssl(self):
         'Test serving over SSL'
-        s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM, 0)
-        s.bind(('localhost', 0))
-        address = s.getsockname()[0]
+        address = '127.0.0.1'
         with TemporaryDirectory('srv-test-ssl') as tdir:
             cert_file, key_file, ca_file = map(lambda x:os.path.join(tdir, x), 'cka')
             create_server_cert(address, ca_file, cert_file, key_file, key_size=1024)
             ctx = ssl.create_default_context(cafile=ca_file)
-            with TestServer(lambda data:(data.path[0] + data.read()), ssl_certfile=cert_file, ssl_keyfile=key_file) as server:
-                conn = httplib.HTTPSConnection(server.address[0], server.address[1], strict=True, context=ctx)
+            with TestServer(lambda data:(data.path[0] + data.read()), ssl_certfile=cert_file, ssl_keyfile=key_file, listen_on=address, port=0) as server:
+                conn = httplib.HTTPSConnection(address, server.address[1], strict=True, context=ctx)
                 conn.request('GET', '/test', 'body')
                 r = conn.getresponse()
                 self.ae(r.status, httplib.OK)
@@ -228,34 +234,55 @@ class LoopTest(BaseTest):
         'Test the jobs manager'
         from calibre.srv.jobs import JobsManager
         O = namedtuple('O', 'max_jobs max_job_time')
+
         class FakeLog(list):
+
             def error(self, *args):
                 self.append(' '.join(args))
-        jm = JobsManager(O(1, 5), FakeLog())
-        job_id = jm.start_job('simple test', 'calibre.srv.jobs', 'sleep_test', args=(1.0,))
-        job_id2 = jm.start_job('t2', 'calibre.srv.jobs', 'sleep_test', args=(3,))
-        jid = jm.start_job('err test', 'calibre.srv.jobs', 'error_test')
-        status = jm.job_status(job_id)[0]
         s = ('waiting', 'running')
+        jm = JobsManager(O(1, 5), FakeLog())
+
+        def job_status(jid):
+            return jm.job_status(jid)[0]
+
+        # Start jobs
+        job_id1 = jm.start_job('simple test', 'calibre.srv.jobs', 'sleep_test', args=(1.0,))
+        job_id2 = jm.start_job('t2', 'calibre.srv.jobs', 'sleep_test', args=(3,))
+        job_id3 = jm.start_job('err test', 'calibre.srv.jobs', 'error_test')
+
+        # Job 1
+        job_id = job_id1
+        status = jm.job_status(job_id)[0]
         self.assertIn(status, s)
-        status2 = jm.job_status(job_id2)[0]
-        self.assertEqual(status2, 'waiting')
-        while jm.job_status(job_id)[0] in s:
+        for jid in (job_id2, job_id3):
+            self.assertEqual(job_status(jid), 'waiting')
+        while job_status(job_id) in s:
             time.sleep(0.01)
         status, result, tb, was_aborted = jm.job_status(job_id)
         self.assertEqual(status, 'finished')
         self.assertFalse(was_aborted)
         self.assertFalse(tb)
         self.assertEqual(result, 1.0)
-        status2 = jm.job_status(job_id2)[0]
-        time.sleep(0.01)
-        self.assertEqual(status2, 'running')
-        jm.abort_job(job_id2)
-        self.assertTrue(jm.wait_for_running_job(job_id2))
-        status, result, tb, was_aborted = jm.job_status(job_id2)
+
+        # Job 2
+        job_id = job_id2
+        while job_status(job_id) == 'waiting':
+            time.sleep(0.01)
+        self.assertEqual('running', job_status(job_id))
+        jm.abort_job(job_id)
+        self.assertIn(jm.wait_for_running_job(job_id), (True, None))
+        status, result, tb, was_aborted = jm.job_status(job_id)
+        self.assertEqual('finished', status)
         self.assertTrue(was_aborted)
-        self.assertTrue(jm.wait_for_running_job(jid))
-        status, result, tb, was_aborted = jm.job_status(jid)
+
+        # Job 3
+        job_id = job_id3
+        while job_status(job_id) == 'waiting':
+            time.sleep(0.01)
+        self.assertIn(jm.wait_for_running_job(job_id), (True, None))
+        status, result, tb, was_aborted = jm.job_status(job_id)
+        self.assertEqual(status, 'finished')
+        self.assertFalse(was_aborted)
         self.assertTrue(tb), self.assertIn('a testing error', tb)
         jm.start_job('simple test', 'calibre.srv.jobs', 'sleep_test', args=(1.0,))
         jm.shutdown(), jm.wait_for_shutdown(monotonic() + 1)

@@ -13,6 +13,7 @@ from calibre.utils.config import OptionParser
 from calibre.gui2 import error_dialog
 from calibre import prints
 
+
 def option_parser(usage='''\
 Usage: %prog [options]
 
@@ -20,6 +21,7 @@ Launch the Graphical User Interface
 '''):
     parser = OptionParser(usage)
     return parser
+
 
 class GarbageCollector(QObject):
 
@@ -68,6 +70,7 @@ class GarbageCollector(QObject):
         for obj in gc.garbage:
             print (obj, repr(obj), type(obj))
 
+
 class ExceptionHandler(object):
 
     def __init__(self, main_window):
@@ -80,13 +83,13 @@ class ExceptionHandler(object):
         else:
             sys.__excepthook__(type, value, tb)
 
+
 class MainWindow(QMainWindow):
 
     ___menu_bar = None
     ___menu     = None
     __actions   = []
 
-    keyboard_interrupt = pyqtSignal()
     # See https://bugreports.qt-project.org/browse/QTBUG-42281
     window_blocked = pyqtSignal()
     window_unblocked = pyqtSignal()
@@ -131,8 +134,7 @@ class MainWindow(QMainWindow):
         sys.excepthook = ExceptionHandler(self)
 
     def unhandled_exception(self, type, value, tb):
-        if type == KeyboardInterrupt:
-            self.keyboard_interrupt.emit()
+        if type is KeyboardInterrupt:
             return
         try:
             sio = StringIO.StringIO()
@@ -162,3 +164,33 @@ class MainWindow(QMainWindow):
         elif etype == ev.WindowUnblocked:
             self.window_unblocked.emit()
         return QMainWindow.event(self, ev)
+
+
+def clone_menu(menu):
+    # This is needed to workaround a bug in Qt 5.5+ and Unity. When the same
+    # QAction object is used in both a QMenuBar and a QMenu, sub-menus of the
+    # QMenu flicker when rendered under Unity.
+    def clone_action(ac, parent):
+        if ac.isSeparator():
+            ans = QAction(parent)
+            ans.setSeparator(True)
+            return ans
+        sc = ac.shortcut()
+        sc = '' if sc.isEmpty() else sc.toString(sc.NativeText)
+        ans = QAction(ac.icon(), ac.text() + '\t' + sc, parent)
+        ans.triggered.connect(ac.trigger)
+        ans.setEnabled(ac.isEnabled())
+        ans.setStatusTip(ac.statusTip())
+        ans.setVisible(ac.isVisible())
+        return ans
+
+    def clone_one_menu(m):
+        ans = QMenu(m.parent())
+        for ac in m.actions():
+            cac = clone_action(ac, ans)
+            ans.addAction(cac)
+            m = ac.menu()
+            if m is not None:
+                cac.setMenu(clone_menu(m))
+        return ans
+    return clone_one_menu(menu)

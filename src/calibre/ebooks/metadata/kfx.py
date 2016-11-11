@@ -17,7 +17,8 @@ from calibre.utils.cleantext import clean_xml_chars
 from calibre.utils.config_base import tweaks
 from calibre.utils.date import parse_only_date
 from calibre.utils.localization import canonicalize_lang
-from calibre.utils.magick.draw import identify_data
+from calibre.utils.imghdr import identify
+
 
 class InvalidKFX(ValueError):
     pass
@@ -59,6 +60,7 @@ COVER_KEY = "cover_image_base64"
 
 def hexs(string, sep=' '):
     return sep.join('%02x' % ord(b) for b in string)
+
 
 class PackedData(object):
 
@@ -236,6 +238,7 @@ def property_name(property_number):
     # strings using a symbol table
     return b"P%d" % property_number
 
+
 def extract_metadata(container_data):
     metadata = defaultdict(list)
 
@@ -258,11 +261,13 @@ def extract_metadata(container_data):
 
     return metadata
 
+
 def dump_metadata(m):
     d = dict(m)
     d[COVER_KEY] = bool(d.get(COVER_KEY))
     from pprint import pprint
     pprint(d)
+
 
 def read_metadata_kfx(stream, read_cover=True):
     ' Read the metadata.kfx file that is found in the sdr book folder for KFX files '
@@ -313,10 +318,10 @@ def read_metadata_kfx(stream, read_cover=True):
     if read_cover and m[COVER_KEY]:
         try:
             data = base64.standard_b64decode(m[COVER_KEY])
-            w, h, fmt = identify_data(data)
+            fmt, w, h = identify(bytes(data))
         except Exception:
             w, h, fmt = 0, 0, None
-        if fmt and w and h:
+        if fmt and w > -1 and h > -1:
             mi.cover_data = (fmt, data)
 
     return mi

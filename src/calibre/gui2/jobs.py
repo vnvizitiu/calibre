@@ -31,6 +31,7 @@ from calibre.gui2.widgets2 import Dialog
 from calibre.utils.search_query_parser import SearchQueryParser, ParseException
 from calibre.utils.icu import lower
 
+
 class AdaptSQP(SearchQueryParser):
 
     def __init__(self, *args, **kwargs):
@@ -89,14 +90,15 @@ class JobManager(QAbstractTableModel, AdaptSQP):  # {{{
     def get_tooltip(self):
         running_jobs = [j for j in self.jobs if j.run_state == j.RUNNING]
         waiting_jobs = [j for j in self.jobs if j.run_state == j.WAITING]
-        lines = [_('There are %d running jobs:')%len(running_jobs)]
+        lines = [ngettext('There is a running job:', 'There are {} running jobs:', len(running_jobs)).format(len(running_jobs))]
         for job in running_jobs:
             desc = job.description
             if not desc:
                 desc = _('Unknown job')
             p = 100. if job.is_finished else job.percent
             lines.append('%s:  %.0f%% done'%(desc, p))
-        lines.extend(['', _('There are %d waiting jobs:')%len(waiting_jobs)])
+        l = ngettext('There is a waiting job', 'There are {} waiting jobs', len(waiting_jobs)).format(len(waiting_jobs))
+        lines.extend(['', l])
         for job in waiting_jobs:
             desc = job.description
             if not desc:
@@ -353,6 +355,7 @@ class JobManager(QAbstractTableModel, AdaptSQP):  # {{{
 
 # }}}
 
+
 class FilterModel(QSortFilterProxyModel):  # {{{
 
     search_done = pyqtSignal(object)
@@ -389,6 +392,7 @@ class FilterModel(QSortFilterProxyModel):  # {{{
 
 # Jobs UI {{{
 
+
 class ProgressBarDelegate(QAbstractItemDelegate):  # {{{
 
     def sizeHint(self, option, index):
@@ -408,6 +412,7 @@ class ProgressBarDelegate(QAbstractItemDelegate):  # {{{
         opts.text = (_('Unavailable') if percent == 0 else '%d%%'%percent)
         QApplication.style().drawControl(QStyle.CE_ProgressBar, opts, painter)
 # }}}
+
 
 class DetailView(Dialog):  # {{{
 
@@ -453,6 +458,7 @@ class DetailView(Dialog):  # {{{
             if more:
                 self.log.appendPlainText(more.decode('utf-8', 'replace'))
 # }}}
+
 
 class JobsButton(QFrame):  # {{{
 
@@ -555,6 +561,7 @@ class JobsButton(QFrame):  # {{{
             QCoreApplication.instance().alert(self, 5000)
 
 # }}}
+
 
 class JobsDialog(QDialog, Ui_JobsDialog):
 
@@ -686,5 +693,3 @@ class JobsDialog(QDialog, Ui_JobsDialog):
         self.proxy_model.find(query)
 
 # }}}
-
-

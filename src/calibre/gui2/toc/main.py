@@ -27,6 +27,7 @@ from calibre.utils.logging import GUILog
 
 ICON_SIZE = 24
 
+
 class XPathDialog(QDialog):  # {{{
 
     def __init__(self, parent, prefs):
@@ -119,6 +120,7 @@ class XPathDialog(QDialog):  # {{{
     def xpaths(self):
         return [w.xpath for w in self.widgets if w.xpath.strip()]
 # }}}
+
 
 class ItemView(QFrame):  # {{{
 
@@ -351,6 +353,7 @@ class ItemView(QFrame):  # {{{
 
 # }}}
 
+
 class TreeWidget(QTreeWidget):  # {{{
 
     edit_item = pyqtSignal()
@@ -544,6 +547,7 @@ class TreeWidget(QTreeWidget):  # {{{
 
     def show_context_menu(self, point):
         item = self.currentItem()
+
         def key(k):
             sc = unicode(QKeySequence(k | Qt.CTRL).toString(QKeySequence.NativeText))
             return ' [%s]'%sc
@@ -569,12 +573,14 @@ class TreeWidget(QTreeWidget):  # {{{
             m.exec_(QCursor.pos())
 # }}}
 
+
 class TOCView(QWidget):  # {{{
 
     add_new_item = pyqtSignal(object, object)
 
     def __init__(self, parent, prefs):
         QWidget.__init__(self, parent)
+        self.toc_title = None
         self.prefs = prefs
         l = self.l = QGridLayout()
         self.setLayout(l)
@@ -748,6 +754,7 @@ class TOCView(QWidget):  # {{{
             self.item_view.hide_azw3_warning()
         self.toc = get_toc(self.ebook)
         self.toc_lang, self.toc_uid = self.toc.lang, self.toc.uid
+        self.toc_title = self.toc.toc_title
         self.blank = QIcon(I('blank.png'))
         self.ok = QIcon(I('ok.png'))
         self.err = QIcon(I('dot_red.png'))
@@ -877,7 +884,8 @@ class TOCEditor(QDialog):  # {{{
         ll.addWidget(pi, alignment=Qt.AlignHCenter|Qt.AlignCenter)
         la = self.wait_label = QLabel(_('Loading %s, please wait...')%t)
         la.setWordWrap(True)
-        la.setStyleSheet('QLabel { font-size: 20pt }')
+        f = la.font()
+        f.setPointSize(20), la.setFont(f)
         ll.addWidget(la, alignment=Qt.AlignHCenter|Qt.AlignTop)
         self.toc_view = TOCView(self, self.prefs)
         self.toc_view.add_new_item.connect(self.add_new_item)
@@ -972,6 +980,7 @@ class TOCEditor(QDialog):  # {{{
         tb = None
         try:
             toc = self.toc_view.create_toc()
+            toc.toc_title = getattr(self.toc_view, 'toc_title', None)
             commit_toc(self.ebook, toc, lang=self.toc_view.toc_lang,
                     uid=self.toc_view.toc_uid)
             self.ebook.commit()

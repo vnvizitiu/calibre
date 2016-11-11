@@ -4,6 +4,17 @@ from __python__ import hash_literals
 
 from gettext import gettext as _
 
+def encode_query_component(x):
+    ans = encodeURIComponent(x)
+    # The following exceptions are to make epubcfi() look better
+    ans = ans.replace(/%2[fF]/g, '/')
+    ans = ans.replace(/%40/g, '@')
+    ans = ans.replace(/%5[bB]/g, '[')
+    ans = ans.replace(/%5[dD]/g, ']')
+    ans = ans.replace(/%5[eE]/g, '^')
+    ans = ans.replace(/%3[aA]/g, ':')
+    return ans
+
 def encode_query(query):
     if not query:
         return ''
@@ -15,7 +26,7 @@ def encode_query(query):
             val = query[k]
             if val is undefined or val is None:
                 continue
-            path += ('&' if has_query else '?') + encodeURIComponent(k) + '=' + encodeURIComponent(val.toString())
+            path += ('&' if has_query else '?') + encodeURIComponent(k) + '=' + encode_query_component(val.toString())
             has_query = True
     return path
 
@@ -87,6 +98,20 @@ def ajax_send(path, data, on_complete, on_progress=None, query=None, timeout=30*
     xhr.setRequestHeader('Content-Type', 'application/json;charset=UTF-8')
     xhr.send(JSON.stringify(data))
     return xhr
+
+
+allow_console_print = False
+
+def set_allow_console_print(val):
+    nonlocal allow_console_print
+    allow_console_print = bool(val)
+
+def console_print(*args):
+    print(*args)
+    if allow_console_print:
+        data = ' '.join(map(str, args)) + '\n'
+        xhr = ajax('console-print', def():pass;, method='POST', progress_totals_needed=False)
+        xhr.send(data)
 
 # TODO: Implement AJAX based switch user by:
 # 1) POST to a logout URL with an incorrect username and password

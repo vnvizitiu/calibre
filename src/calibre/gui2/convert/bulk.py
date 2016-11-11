@@ -21,6 +21,7 @@ from calibre.ebooks.conversion.plumber import Plumber
 from calibre.utils.config import prefs
 from calibre.utils.logging import Log
 
+
 class BulkConfig(Config):
 
     def __init__(self, parent, db, preferred_output_format=None,
@@ -70,8 +71,8 @@ class BulkConfig(Config):
         output_path = 'dummy.'+output_format
         log = Log()
         log.outputs = []
-        self.plumber = Plumber(input_path, output_path, log,
-                merge_plugin_recs=False)
+        self.plumber = Plumber(input_path, output_path, log, merge_plugin_recs=False)
+        self.plumber.merge_plugin_recs(self.plumber.output_plugin)
 
         def widget_factory(cls):
             return cls(self.stack, self.plumber.get_option_by_name,

@@ -132,14 +132,17 @@ class EditMetadataAction(InterfaceAction):
         if all_failed:
             num = len(failed_ids | failed_covers)
             self.cleanup_bulk_download(tdir)
-            return error_dialog(self.gui, _('Download failed'),
-            _('Failed to download metadata or covers for any of the %d'
-               ' book(s).') % num, det_msg=det_msg, show=True)
+            return error_dialog(self.gui, _('Download failed'), ngettext(
+                'Failed to download metadata or cover for the selected book.',
+                'Failed to download metadata or covers for any of the {} books.', num
+            ).format(num), det_msg=det_msg, show=True)
 
         self.gui.status_bar.show_message(_('Metadata download completed'), 3000)
 
-        msg = '<p>' + _('Finished downloading metadata for <b>%d book(s)</b>. '
-            'Proceed with updating the metadata in your library?')%len(id_map)
+        msg = '<p>' + ngettext(
+            'Finished downloading metadata for the selected book.',
+            'Finished downloading metadata for <b>{} books</b>.', len(id_map)).format(len(id_map)) + ' ' + \
+            _('Proceed with updating the metadata in your library?')
 
         show_copy_button = False
         checkbox_msg = None
@@ -434,6 +437,7 @@ class EditMetadataAction(InterfaceAction):
         dest_id, src_ids = self.books_to_merge(rows)
         mi = self.gui.current_db.new_api.get_proxy_metadata(dest_id)
         title = mi.title
+        hpos = self.gui.library_view.horizontalScrollBar().value()
         if safe_merge:
             if not confirm_merge('<p>'+_(
                 'Book formats and metadata from the selected books '
@@ -484,6 +488,7 @@ class EditMetadataAction(InterfaceAction):
             self.gui.library_view.set_current_row(dest_row)
         cr = self.gui.library_view.currentIndex().row()
         self.gui.library_view.model().refresh_ids((dest_id,), cr)
+        self.gui.library_view.horizontalScrollBar().setValue(hpos)
 
     def add_formats(self, dest_id, src_books, replace=False):
         for src_book in src_books:

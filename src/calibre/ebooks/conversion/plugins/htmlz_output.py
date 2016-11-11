@@ -14,6 +14,7 @@ from calibre.customize.conversion import OutputFormatPlugin, \
     OptionRecommendation
 from calibre.ptempfile import TemporaryDirectory
 
+
 class HTMLZOutput(OutputFormatPlugin):
 
     name = 'HTMLZ Output'
@@ -102,9 +103,9 @@ class HTMLZOutput(OutputFormatPlugin):
                     term = oeb_book.metadata.cover[0].term
                     cover_data = oeb_book.guide[term].item.data
                 if cover_data:
-                    from calibre.utils.magick.draw import save_cover_data_to
+                    from calibre.utils.img import save_cover_data_to
                     cover_path = os.path.join(tdir, u'cover.jpg')
-                    with open(cover_path, 'w') as cf:
+                    with lopen(cover_path, 'w') as cf:
                         cf.write('')
                     save_cover_data_to(cover_data, cover_path)
             except:

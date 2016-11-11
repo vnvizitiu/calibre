@@ -36,6 +36,7 @@ from calibre.gui2.tweak_book.check import Check
 from calibre.gui2.tweak_book.check_links import CheckExternalLinks
 from calibre.gui2.tweak_book.spell import SpellCheck
 from calibre.gui2.tweak_book.search import SavedSearches
+from calibre.gui2.tweak_book.text_search import TextSearch
 from calibre.gui2.tweak_book.toc import TOCViewer
 from calibre.gui2.tweak_book.char_select import CharSelect
 from calibre.gui2.tweak_book.live_css import LiveCSS
@@ -47,8 +48,10 @@ from calibre.gui2.tweak_book.editor.insert_resource import InsertImage
 from calibre.utils.icu import character_name, sort_key
 from calibre.utils.localization import localize_user_manual_link
 
+
 def open_donate():
-    open_url(QUrl('http://calibre-ebook.com/donate'))
+    open_url(QUrl('https://calibre-ebook.com/donate'))
+
 
 class Central(QStackedWidget):  # {{{
 
@@ -197,6 +200,7 @@ class Central(QStackedWidget):  # {{{
         return True
 # }}}
 
+
 class CursorPositionWidget(QWidget):  # {{{
 
     def __init__(self, parent):
@@ -226,6 +230,7 @@ class CursorPositionWidget(QWidget):  # {{{
             self.la.setText(text)
 # }}}
 
+
 class Main(MainWindow):
 
     APP_NAME = _('Edit Book')
@@ -248,6 +253,7 @@ class Main(MainWindow):
         self.check_book = Check(self)
         self.spell_check = SpellCheck(parent=self)
         self.toc_view = TOCViewer(self)
+        self.text_search = TextSearch(self)
         self.saved_searches = SavedSearches(self)
         self.image_browser = InsertImage(self, for_browsing=True)
         self.reports = Reports(self)
@@ -320,6 +326,7 @@ class Main(MainWindow):
                 sid, unicode(ac.text()).replace('&', ''), default_keys=keys, description=description, action=ac, group=group)
             self.addAction(ac)
             return ac
+
         def treg(icon, text, target, sid, keys, description):
             return reg(icon, text, target, sid, keys, description, toolbar_allowed=icon is not None)
 
@@ -394,6 +401,9 @@ class Main(MainWindow):
             'Compress images losslessly'))
         self.action_transform_styles = treg('wizard.png', _('Transform &styles'), self.boss.transform_styles, 'transform-styles', (), _(
             'Transform styles used in the book'))
+        self.action_get_ext_resources = treg('download-metadata.png', _('Download external &resources'),
+                                             self.boss.get_external_resources, 'get-external-resources', (), _(
+            'Download external resources in the book (images/stylesheets/etc/ that are not included in the book)'))
 
         def ereg(icon, text, target, sid, keys, description):
             return reg(icon, text, partial(self.boss.editor_action, target), sid, keys, description)
@@ -420,7 +430,7 @@ class Main(MainWindow):
         self.action_auto_sync_preview = reg('sync-right.png', _('Sync preview position to editor position'), None, 'sync-preview-to-editor', (), _(
             'Sync preview position to editor position'))
         self.action_reload_preview = reg('view-refresh.png', _('Refresh preview'), None, 'reload-preview', ('F5',), _('Refresh preview'))
-        self.action_split_in_preview = reg('auto_author_sort.png', _('Split this file'), None, 'split-in-preview', (), _(
+        self.action_split_in_preview = reg('document-split.png', _('Split this file'), None, 'split-in-preview', (), _(
             'Split file in the preview panel'))
         self.action_find_next_preview = reg('arrow-down.png', _('Find Next'), None, 'find-next-preview', (), _('Find next in preview'))
         self.action_find_prev_preview = reg('arrow-up.png', _('Find Previous'), None, 'find-prev-preview', (), _('Find previous in preview'))
@@ -428,6 +438,7 @@ class Main(MainWindow):
         # Search actions
         group = _('Search')
         self.action_find = treg('search.png', _('&Find/Replace'), self.boss.show_find, 'find-replace', ('Ctrl+F',), _('Show the Find/Replace panel'))
+
         def sreg(name, text, action, overrides={}, keys=(), description=None, icon=None):
             return reg(icon, text, partial(self.boss.search_action_triggered, action, overrides), name, keys, description or text.replace('&', ''))
         self.action_find_next = sreg('find-next', _('Find &Next'),
@@ -450,6 +461,8 @@ class Main(MainWindow):
         self.action_go_to_line = reg(None, _('Go to &line'), self.boss.go_to_line_number, 'go-to-line-number', ('Ctrl+.',), _('Go to line number'))
         self.action_saved_searches = treg('folder_saved_search.png', _('Sa&ved searches'),
                                           self.boss.saved_searches, 'saved-searches', (), _('Show the saved searches dialog'))
+        self.action_text_search = treg('view.png', _('Search ignoring HTML markup'),
+                                          self.boss.show_text_search, 'text-search', (), _('Show the text search panel'))
 
         # Check Book actions
         group = _('Check Book')
@@ -476,7 +489,7 @@ class Main(MainWindow):
                 'Close all tabs except the current tab'))
         self.action_help = treg(
             'help.png', _('User &Manual'), lambda : open_url(QUrl(localize_user_manual_link(
-                'http://manual.calibre-ebook.com/edit.html'))), 'user-manual', 'F1', _(
+                'https://manual.calibre-ebook.com/edit.html'))), 'user-manual', 'F1', _(
                 'Show User Manual'))
         self.action_browse_images = treg(
             'view-image.png', _('&Browse images in book'), self.boss.browse_images, 'browse-images', (), _(
@@ -553,7 +566,9 @@ class Main(MainWindow):
         e.addAction(self.action_set_semantics)
         e.addAction(self.action_filter_css)
         e.addAction(self.action_spell_check_book)
-        e.addAction(self.action_check_external_links)
+        er = e.addMenu(_('External Links'))
+        er.addAction(self.action_check_external_links)
+        er.addAction(self.action_get_ext_resources)
         e.addAction(self.action_check_book)
         e.addAction(self.action_reports)
 
@@ -591,6 +606,8 @@ class Main(MainWindow):
         e.addSeparator()
         a(self.action_saved_searches)
         e.aboutToShow.connect(self.search_menu_about_to_show)
+        e.addSeparator()
+        a(self.action_text_search)
 
         if self.plugin_menu_actions:
             e = b.addMenu(_('&Plugins'))
@@ -629,6 +646,7 @@ class Main(MainWindow):
 
     def populate_toolbars(self, animate=False):
         self.global_bar.clear(), self.tools_bar.clear(), self.plugins_bar.clear()
+
         def add(bar, ac):
             if ac is None:
                 bar.addSeparator()
@@ -710,6 +728,12 @@ class Main(MainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, d)
         d.close()  # Hidden by default
 
+        d = create(_('Text Search'), 'text-search')
+        d.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea)
+        d.setWidget(self.text_search)
+        self.addDockWidget(Qt.LeftDockWidgetArea, d)
+        d.close()  # Hidden by default
+
         d = create(_('Checkpoints'), 'checkpoints')
         d.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea | Qt.TopDockWidgetArea)
         self.checkpoints = CheckpointView(self.boss.global_undo, parent=d)
@@ -743,6 +767,7 @@ class Main(MainWindow):
         self.central.save_state()
         self.saved_searches.save_state()
         self.check_book.save_state()
+        self.text_search.save_state()
 
     def restore_state(self):
         geom = tprefs.get('main_window_geometry', None)

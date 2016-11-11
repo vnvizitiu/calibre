@@ -11,6 +11,7 @@ __copyright__ = '2015, Kovid Goyal <kovid at kovidgoyal.net>'
 import socket, errno
 from calibre.constants import islinux
 
+
 def pre_activated_socket():
     return None
 has_preactivated_support = False
@@ -33,11 +34,13 @@ if islinux:
 
     try:
         systemd = ctypes.CDLL(ctypes.util.find_library('systemd'))
+        systemd.sd_listen_fds
     except Exception:
         pass
     else:
         del pre_activated_socket
         has_preactivated_support = True
+
         def pre_activated_socket():  # noqa
             num = systemd.sd_listen_fds(1)  # Remove systemd env vars so that child processes do not inherit them
             if num > 1:

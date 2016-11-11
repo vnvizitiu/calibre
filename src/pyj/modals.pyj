@@ -4,12 +4,25 @@ from __python__ import hash_literals
 
 from ajax import ajax, ajax_send
 from elementmaker import E
-from dom import set_css, clear, build_rule, svgicon
+from dom import set_css, clear, build_rule, svgicon, add_extra_css
 from gettext import gettext as _
 from book_list.theme import get_color, get_font_size
+from popups import MODAL_Z_INDEX
 
 modal_container = None
 modal_count = 0
+
+add_extra_css(def():
+    style = build_rule(
+        '#modal-container > div > a:hover',
+        color=get_color('dialog-foreground') + ' !important',
+        background_color=get_color('dialog-background') + ' !important'
+    )
+    style += build_rule(
+        '#modal-container a.dialog-simple-link:hover', color='red !important'
+    )
+    return style
+)
 
 class Modal:
 
@@ -26,16 +39,6 @@ class ModalContainer:
             E.div(  # popup
                 E.div(),  # content area
                 E.a(svgicon('close'), title=_('Close'))
-            ),
-            E.style(
-                build_rule(
-                    '#modal-container > div > a:hover',
-                    color=get_color('dialog-foreground') + ' !important',
-                    background_color=get_color('dialog-background') + ' !important'
-                ) +
-                build_rule(
-                    '#modal-container a.dialog-simple-link:hover', color='red !important'
-                )
             )
         )
         document.body.appendChild(div)
@@ -43,14 +46,14 @@ class ModalContainer:
         # Container style
         set_css(div,
             position='fixed', top='0', right='0', bottom='0', left='0', # Stretch over entire window
-            background_color='rgba(0,0,0,0.8)', z_index='1000',
+            background_color='rgba(0,0,0,0.8)', z_index=MODAL_Z_INDEX + '',
             display='none', text_align='center', user_select='none'
         )
 
         # Popup style
         set_css(div.firstChild,
             position='relative', display='inline-block', top='50vh', transform='translateY(-50%)',
-            min_width='25vw', max_width='75vw',
+            min_width='25vw', max_width='70vw',  # Needed for iPhone 5
             border_radius='1em', padding='1em 2em', margin_right='1em', margin_left='1em',
             background=get_color('dialog-background'), color=get_color('dialog-foreground'),
             background_image=get_color('dialog-background-image'), get_color('dialog-background'), get_color('dialog-background2')

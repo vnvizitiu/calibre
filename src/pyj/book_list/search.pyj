@@ -3,15 +3,38 @@
 from __python__ import hash_literals
 
 from ajax import ajax
-from dom import clear, set_css, build_rule, svgicon
+from complete import create_search_bar
+from dom import clear, set_css, build_rule, svgicon, add_extra_css
 from elementmaker import E
 from gettext import gettext as _
-from widgets import create_button, BUTTON_VPADDING, create_spinner, Breadcrumbs
+from widgets import create_button, create_spinner, Breadcrumbs
 from modals import show_modal
+from utils import rating_to_stars
 from book_list.globals import get_boss, get_session_data
 from book_list.theme import get_color, get_font_size
 
 sp_counter = 0
+CLASS_NAME = 'book-search-panel'
+add_extra_css(def():
+    sel = '.' + CLASS_NAME + ' '
+
+    style =  build_rule(sel + ' div.tag-name:hover', color=get_color('list-hover-foreground'), background_color=get_color('list-hover-background'))
+    style += build_rule(sel + ' div.tag-menu:hover', color=get_color('list-hover-foreground'), background_color=get_color('list-hover-background'))
+    style += build_rule(sel + ' div.tag-name:active', transform='scale(1.5)')
+    style += build_rule(sel + ' div.tag-menu:active', transform='scale(2)')
+
+    # search items list
+    style += build_rule(sel + ' ul.search-items', margin_top='1ex', list_style_type='none', text_align='left')
+    style += build_rule(sel + ' ul.search-items > li', display='inline-block', cursor='pointer', background_color=get_color('window-background2'), border_radius='10px', padding='0.5ex', margin_right='1em')
+    style += build_rule(sel + ' ul.search-items > li:hover', color='red')
+    style += build_rule(sel + ' ul.search-items > li:active', transform='scale(1.5)')
+
+    # Actions popup
+    style +=  build_rule('#modal-container ul.tb-action-list > li:hover', color=get_color('list-hover-foreground'), background_color=get_color('list-hover-background'))
+    style += build_rule('#modal-container ul.tb-action-list > li:active', color='red', color=get_color('list-hover-foreground'), background_color=get_color('list-hover-background'))
+
+    return style
+)
 
 class SearchPanel:
 
@@ -21,20 +44,9 @@ class SearchPanel:
         self.container_id = 'search-panel-' + sp_counter
         self.interface_data = interface_data
         self.tag_path = []
-        style =  build_rule('#' + self.container_id + ' div.tag-name:hover', color=get_color('list-hover-foreground'), background_color=get_color('list-hover-background'))
-        style += build_rule('#' + self.container_id + ' div.tag-menu:hover', color=get_color('list-hover-foreground'), background_color=get_color('list-hover-background'))
-        style += build_rule('#' + self.container_id + ' div.tag-name:active', transform='scale(1.5)')
-        style += build_rule('#' + self.container_id + ' div.tag-menu:active', transform='scale(2)')
-
-        # search items list
-        style += build_rule('#' + self.container_id + ' ul.search-items', margin_top='1ex', list_style_type='none', text_align='left')
-        style += build_rule('#' + self.container_id + ' ul.search-items > li', display='inline-block', cursor='pointer', background_color=get_color('window-background2'), border_radius='10px', padding='0.5ex', margin_right='1em')
-        style += build_rule('#' + self.container_id + ' ul.search-items > li:hover', color='red')
-        style += build_rule('#' + self.container_id + ' ul.search-items > li:active', transform='scale(1.5)')
 
         div = E.div(
-            id=self.container_id, style='display:none',
-            E.style(style, type='text/css'),
+            id=self.container_id, style='display:none', class_=CLASS_NAME,
             E.div(style="text-align:center; padding:1ex 1em; border-bottom: solid 1px currentColor; margin-bottom: 0.5ex"),  # search input container
             E.div(
                 E.div(),
@@ -45,23 +57,11 @@ class SearchPanel:
         book_list_container.appendChild(div)
 
         # Build search input
-        search_container = div.firstChild.nextSibling
-        search_button = create_button(_('Search'), icon='search', action=self.execute_search.bind(self), tooltip=_('Do the search'))
-        search_container.appendChild(E.div(style="display: flex; width: 100%;",
-            E.input(
-                type='search', autosave='search-for-books-in-main-calibre-booklist', name='search-books',
-                autocomplete='on', inputmode='latin',
-                title=_('Search for books'), placeholder=_('Enter the search query'), spellcheck='false',
-                style="flex-grow: 10; padding: {} 0.5em; margin-right: 0.5em".format(BUTTON_VPADDING)
-            ),
-            search_button
-        ))
-        search_container.firstChild.firstChild.addEventListener('keypress', def(event):
-            if event.keyCode is 13:  # Enter
-                search_button.focus()
-                self.execute_search()
-                event.preventDefault(), event.stopPropagation()
-        )
+        search_container = div.firstChild
+        search_button = create_button(_('Search'), icon='search', tooltip=_('Do the search'))
+        search_bar = create_search_bar(self.execute_search.bind(self), 'search-books', tooltip=_('Search for books'), placeholder=_('Enter the search query'), button=search_button)
+        set_css(search_bar, flex_grow='10', margin_right='0.5em')
+        search_container.appendChild(E.div(style="display: flex; width: 100%;", search_bar, search_button))
         search_container.appendChild(E.ul(class_='search-items'))
 
         # Build loading panel
@@ -225,6 +225,7 @@ class SearchPanel:
             return ''
 
         search_state = {'plus':'true', 'plusplus':'.true', 'minus':'false', 'minusminus':'.false'}[state]
+        stars = rating_to_stars(3, True)
 
         if item.is_category:
             category = item.category
@@ -257,9 +258,12 @@ class SearchPanel:
             return expr
 
         category = 'tags' if item.category is 'news' else item.category
-        if item.name and item.name[0] is '★':
+        if item.name and item.name[0] in stars:
             # Assume ratings
-            expr = '{}:{}'.format(category, item.name.length)
+            rnum = item.name.length
+            if item.name.endswith(stars[-1]):
+                rnum = '{}.5'.format(rnum - 1)
+            expr = '{}:{}'.format(category, rnum)
         else:
             fm = self.interface_data.field_metadata[item.category]
             suffix = ':' if fm and fm.is_csp else ''
@@ -305,11 +309,8 @@ class SearchPanel:
             if items.length:
                 suffix = ' [' + items.join(' ') + ']'
 
-            style =  build_rule('#modal-container ul.tb-action-list > li:hover', color=get_color('list-hover-foreground'), background_color=get_color('list-hover-background'))
-            style += build_rule('#modal-container ul.tb-action-list > li:active', color='red', color=get_color('list-hover-foreground'), background_color=get_color('list-hover-background'))
             title = E.h2(
                 style='display:flex; align-items: center; border-bottom: solid 1px currentColor; font-weight:bold; font-size:' + get_font_size('title'),
-                E.style(style),
                 E.img(src=self.icon_for_node(node), style='height:2ex'),
                 E.span('\xa0' + name + suffix)
             )
@@ -466,7 +467,7 @@ class SearchPanel:
 
     @property
     def search_items_container(self):
-        return self.container.firstChild.nextSibling.lastChild
+        return self.container.firstChild.lastChild
 
     @property
     def is_visible(self):

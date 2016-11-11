@@ -11,9 +11,10 @@ import sys, os, importlib, time
 from PyQt5.Qt import QIcon
 
 from calibre.constants import islinux, iswindows
-from calibre.gui2 import Application, ORG_NAME, APP_UID, setup_gui_option_parser, decouple
+from calibre.gui2 import Application, setup_gui_option_parser, decouple, set_gui_prefs
 from calibre.ptempfile import reset_base_dir
 from calibre.utils.config import OptionParser
+
 
 def option_parser():
     parser =  OptionParser(_('''\
@@ -25,6 +26,7 @@ files inside the book which will be opened for editing automatically.
     setup_gui_option_parser(parser)
     return parser
 
+
 class EventAccumulator(object):
 
     def __init__(self):
@@ -33,8 +35,10 @@ class EventAccumulator(object):
     def __call__(self, ev):
         self.events.append(ev)
 
+
 def gui_main(path=None, notify=None):
     _run(['ebook-edit', path], notify=notify)
+
 
 def _run(args, notify=None):
     # Ensure we can continue to function if GUI is closed
@@ -48,7 +52,7 @@ def _run(args, notify=None):
         import ctypes
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('com.calibre-ebook.edit-book')
-        except:
+        except Exception:
             pass  # Only available on windows 7 and newer
 
     # The following two lines are needed to prevent circular imports causing
@@ -60,17 +64,16 @@ def _run(args, notify=None):
 
     parser = option_parser()
     opts, args = parser.parse_args(args)
-    decouple('edit-book-')
+    decouple('edit-book-'), set_gui_prefs(tprefs)
     override = 'calibre-edit-book' if islinux else None
     app = Application(args, override_program_name=override, color_prefs=tprefs)
     app.file_event_hook = EventAccumulator()
     app.load_builtin_fonts()
     app.setWindowIcon(QIcon(I('tweak.png')))
-    Application.setOrganizationName(ORG_NAME)
-    Application.setApplicationName(APP_UID)
     main = Main(opts, notify=notify)
     main.set_exception_handler()
     main.show()
+    app.shutdown_signal_received.connect(main.boss.quit)
     if len(args) > 1:
         main.boss.open_book(args[1], edit_file=args[2:], clear_notify_data=False)
     else:
@@ -85,6 +88,7 @@ def _run(args, notify=None):
     from calibre.gui2.tweak_book.preview import parse_worker
     while parse_worker.is_alive() and time.time() - st < 120:
         time.sleep(0.1)
+
 
 def main(args=sys.argv):
     _run(args)

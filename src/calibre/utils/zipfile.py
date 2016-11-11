@@ -21,6 +21,7 @@ except ImportError:
 __all__ = ["BadZipfile", "error", "ZIP_STORED", "ZIP_DEFLATED", "is_zipfile",
            "ZipInfo", "ZipFile", "PyZipFile", "LargeZipFile"]
 
+
 class BadZipfile(Exception):
     pass
 
@@ -42,6 +43,7 @@ ZIP_MAX_COMMENT = (1 << 16) - 1
 ZIP_STORED = 0
 ZIP_DEFLATED = 8
 # Other ZIP compression methods not supported
+# For a list see: http://www.winzip.com/wz54.htm
 
 # Below are some formats and associated data for reading/writing headers using
 # the struct module.  The names and structures of headers/records are those used
@@ -136,6 +138,7 @@ _CD64_NUMBER_ENTRIES_TOTAL = 7
 _CD64_DIRECTORY_SIZE = 8
 _CD64_OFFSET_START_CENTDIR = 9
 
+
 def decode_arcname(name):
     if not isinstance(name, unicode):
         try:
@@ -151,10 +154,13 @@ def decode_arcname(name):
 
 # Added by Kovid to reset timestamp to default if it overflows the DOS
 # limits
+
+
 def fixtimevar(val):
     if val < 0 or val > 0xffff:
         val = 0
     return val
+
 
 def _check_zipfile(fp):
     try:
@@ -163,6 +169,7 @@ def _check_zipfile(fp):
     except IOError:
         pass
     return False
+
 
 def is_zipfile(filename):
     """Quickly see if a file is a ZIP file by checking the magic number.
@@ -179,6 +186,7 @@ def is_zipfile(filename):
     except IOError:
         pass
     return result
+
 
 def _EndRecData64(fpin, offset, endrec):
     """
@@ -487,6 +495,7 @@ class _ZipDecrypter:
         self._UpdateKeys(c)
         return c
 
+
 class ZipExtFile(io.BufferedIOBase):
 
     """File-like object for reading an archive member.
@@ -721,7 +730,7 @@ class ZipFile:
                 raise RuntimeError(
                       "Compression requires the (missing) zlib module")
         else:
-            raise RuntimeError("That compression method is not supported")
+            raise RuntimeError("The compression method %s is not supported" % compression)
 
         self._allowZip64 = allowZip64
         self._didModify = False
@@ -1171,7 +1180,7 @@ class ZipFile:
                   "Compression requires the (missing) zlib module")
         if zinfo.compress_type not in (ZIP_STORED, ZIP_DEFLATED):
             raise RuntimeError(
-                  "That compression method is not supported")
+                  "The compression method %s is not supported" % zinfo.compress_type)
         if zinfo.file_size > ZIP64_LIMIT:
             if not self._allowZip64:
                 raise LargeZipFile("Filesize would require ZIP64 extensions")
@@ -1446,6 +1455,7 @@ class ZipFile:
             self.fp.close()
         self.fp = None
 
+
 def safe_replace(zipstream, name, datastream, extra_replacements={},
         add_missing=False):
     '''
@@ -1469,19 +1479,26 @@ def safe_replace(zipstream, name, datastream, extra_replacements={},
     replacements.update(extra_replacements)
     names = frozenset(replacements.keys())
     found = set([])
+
+    def rbytes(name):
+        r = replacements[name]
+        if not isinstance(r, bytes):
+            r = r.read()
+        return r
+
     with SpooledTemporaryFile(max_size=100*1024*1024) as temp:
         ztemp = ZipFile(temp, 'w')
         for obj in z.infolist():
             if isinstance(obj.filename, unicode):
                 obj.flag_bits |= 0x16  # Set isUTF-8 bit
             if obj.filename in names:
-                ztemp.writestr(obj, replacements[obj.filename].read())
+                ztemp.writestr(obj, rbytes(obj.filename))
                 found.add(obj.filename)
             else:
                 ztemp.writestr(obj, z.read_raw(obj), raw_bytes=True)
         if add_missing:
             for name in names - found:
-                ztemp.writestr(name, replacements[name].read())
+                ztemp.writestr(name, rbytes(name))
         ztemp.close()
         z.close()
         temp.seek(0)
@@ -1489,6 +1506,7 @@ def safe_replace(zipstream, name, datastream, extra_replacements={},
         zipstream.truncate()
         shutil.copyfileobj(temp, zipstream)
         zipstream.flush()
+
 
 class PyZipFile(ZipFile):
 

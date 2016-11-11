@@ -12,12 +12,11 @@ from collections import OrderedDict
 import cherrypy
 
 from calibre.constants import filesystem_encoding, config_dir
-from calibre import (isbytestring, force_unicode, fit_image,
-        prepare_string_for_xml, sanitize_file_name2)
+from calibre import (isbytestring, force_unicode, prepare_string_for_xml, sanitize_file_name2)
 from calibre.utils.filenames import ascii_filename
 from calibre.utils.config import prefs, JSONConfig
 from calibre.utils.icu import sort_key
-from calibre.utils.magick import Image
+from calibre.utils.img import scale_image
 from calibre.library.comments import comments_to_html
 from calibre.library.server import custom_fields_to_display
 from calibre.library.field_metadata import category_icon_map
@@ -25,9 +24,11 @@ from calibre.library.server.utils import quote, unquote
 from calibre.db.categories import Tag
 from calibre.ebooks.metadata.sources.identify import urls_from_identifiers
 
+
 def xml(*args, **kwargs):
     ans = prepare_string_for_xml(*args, **kwargs)
     return ans.replace('&apos;', '&#39;')
+
 
 def render_book_list(ids, prefix, suffix=''):  # {{{
     pages = []
@@ -114,11 +115,13 @@ def render_book_list(ids, prefix, suffix=''):  # {{{
 
 # }}}
 
+
 def utf8(x):  # {{{
     if isinstance(x, unicode):
         x = x.encode('utf-8')
     return x
 # }}}
+
 
 def render_rating(rating, url_prefix, container='span', prefix=None):  # {{{
     if rating < 0.1:
@@ -145,6 +148,7 @@ def render_rating(rating, url_prefix, container='span', prefix=None):  # {{{
     return u''.join(ans), rstring
 
 # }}}
+
 
 def get_category_items(category, items, datatype, prefix):  # {{{
 
@@ -177,6 +181,7 @@ def get_category_items(category, items, datatype, prefix):  # {{{
     return '\n'.join(['<div class="category-container">'] + items + ['</div>'])
 
 # }}}
+
 
 class Endpoint(object):  # {{{
     'Manage encoding, mime-type, last modified, cookies, etc.'
@@ -212,6 +217,7 @@ class Endpoint(object):  # {{{
 
         return do
 # }}}
+
 
 class BrowseServer(object):
 
@@ -333,14 +339,7 @@ class BrowseServer(object):
                     data = I(name, data=True)
                 except:
                     raise cherrypy.HTTPError(404, 'no icon named: %r'%name)
-            img = Image()
-            img.load(data)
-            width, height = img.size
-            scaled, width, height = fit_image(width, height, 48, 48)
-            if scaled:
-                img.size = (width, height)
-
-            self.__browse_icon_cache__[name] = img.export('png')
+            self.__browse_icon_cache__[name] = scale_image(data, 48, 48, as_png=True)[-1]
         return self.__browse_icon_cache__[name]
 
     def browse_toplevel(self):

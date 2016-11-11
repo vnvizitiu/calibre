@@ -11,7 +11,8 @@ from PyQt5.Qt import (QDialog, QPixmap, QUrl, QScrollArea, QLabel, QSizePolicy,
         QDialogButtonBox, QVBoxLayout, QPalette, QApplication, QSize, QIcon,
         Qt, QTransform)
 
-from calibre.gui2 import choose_save_file, gprefs
+from calibre.gui2 import choose_save_file, gprefs, NO_URL_FORMATTING
+
 
 class ImageView(QDialog):
 
@@ -68,7 +69,8 @@ class ImageView(QDialog):
                 _('Choose a file to save to'), filters=filters,
                 all_files=False)
         if f:
-            self.current_img.save(f)
+            from calibre.utils.img import save_image
+            save_image(self.current_img.toImage(), f)
 
     def adjust_image(self, factor):
         self.label.resize(self.factor * self.current_img.size())
@@ -102,7 +104,7 @@ class ImageView(QDialog):
         if geom is not None:
             self.restoreGeometry(geom)
         try:
-            self.current_image_name = unicode(self.current_url.toString(QUrl.None)).rpartition('/')[-1]
+            self.current_image_name = unicode(self.current_url.toString(NO_URL_FORMATTING)).rpartition('/')[-1]
         except AttributeError:
             self.current_image_name = self.current_url
         title = _('View Image: %s')%self.current_image_name
@@ -121,6 +123,7 @@ class ImageView(QDialog):
         if abs(d) > 0 and not self.scrollarea.verticalScrollBar().isVisible():
             event.accept()
             (self.zoom_out if d < 0 else self.zoom_in)()
+
 
 class ImagePopup(object):
 
@@ -145,7 +148,8 @@ class ImagePopup(object):
 
 if __name__ == '__main__':
     import sys
-    app = QApplication([])
+    from calibre.gui2 import Application
+    app = Application([])
     p = QPixmap()
     p.load(sys.argv[-1])
     u = QUrl.fromLocalFile(sys.argv[-1])

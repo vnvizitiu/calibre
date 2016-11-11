@@ -17,6 +17,7 @@ from calibre.gui2 import error_dialog
 from calibre.gui2.toc.main import TOCView, ItemEdit
 from calibre.gui2.tweak_book import current_container, TOP, actions, tprefs
 
+
 class TOCEditor(QDialog):
 
     explode_done = pyqtSignal(object)
@@ -95,17 +96,20 @@ class TOCEditor(QDialog):
 
     def write_toc(self):
         toc = self.toc_view.create_toc()
+        toc.toc_title = getattr(self.toc_view, 'toc_title', None)
         commit_toc(current_container(), toc, lang=self.toc_view.toc_lang,
                 uid=self.toc_view.toc_uid)
 
 DEST_ROLE = Qt.UserRole
 FRAG_ROLE = DEST_ROLE + 1
 
+
 class Delegate(QStyledItemDelegate):
 
     def sizeHint(self, *args):
         ans = QStyledItemDelegate.sizeHint(self, *args)
         return ans + QSize(0, 10)
+
 
 class TOCViewer(QWidget):
 
@@ -115,6 +119,7 @@ class TOCViewer(QWidget):
     def __init__(self, parent=None):
         QWidget.__init__(self, parent)
         self.l = l = QGridLayout(self)
+        self.toc_title = None
         self.setLayout(l)
         l.setContentsMargins(0, 0, 0, 0)
 
@@ -194,6 +199,7 @@ class TOCViewer(QWidget):
             return
         toc = get_toc(c, verify_destinations=False)
         self.toc_name = getattr(toc, 'toc_file_name', None)
+        self.toc_title = toc.toc_title
 
         def process_node(toc, parent):
             for child in toc:

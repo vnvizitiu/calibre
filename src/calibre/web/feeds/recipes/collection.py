@@ -14,12 +14,13 @@ from lxml import etree
 from lxml.builder import ElementMaker
 
 from calibre import force_unicode
-from calibre.utils.date import parse_date, now as nowf, utcnow, tzlocal, \
-        isoformat, fromordinal
+from calibre.utils.iso8601 import parse_iso8601
+from calibre.utils.date import now as nowf, utcnow, local_tz, isoformat, EPOCH, UNDEFINED_DATE
 from calibre.utils.recycle_bin import delete_file
 
 NS = 'http://calibre-ebook.com/recipe_collection'
 E = ElementMaker(namespace=NS, nsmap={None:NS})
+
 
 def iterate_over_builtin_recipe_files():
     exclude = ['craigslist', 'toronto_sun']
@@ -58,6 +59,7 @@ def serialize_recipe(urn, recipe_class):
         'description'        : attr('description', '')
         })
 
+
 def serialize_collection(mapping_of_recipe_classes):
     collection = E.recipe_collection()
     '''for u, x in mapping_of_recipe_classes.items():
@@ -80,6 +82,7 @@ def serialize_collection(mapping_of_recipe_classes):
     return etree.tostring(collection, encoding='utf-8', xml_declaration=True,
             pretty_print=True)
 
+
 def serialize_builtin_recipes():
     from calibre.web.feeds.recipes import compile_recipe
     recipe_mapping = {}
@@ -95,8 +98,10 @@ def serialize_builtin_recipes():
 
     return serialize_collection(recipe_mapping)
 
+
 def get_builtin_recipe_collection():
     return etree.parse(P('builtin_recipes.xml', allow_user_override=False)).getroot()
+
 
 def get_custom_recipe_collection(*args):
     from calibre.web.feeds.recipes import compile_recipe, \
@@ -121,6 +126,7 @@ def get_custom_recipe_collection(*args):
 
 def update_custom_recipe(id_, title, script):
     update_custom_recipes([(id_, title, script)])
+
 
 def update_custom_recipes(script_ids):
     from calibre.web.feeds.recipes import custom_recipes, \
@@ -150,6 +156,7 @@ def update_custom_recipes(script_ids):
 
 def add_custom_recipe(title, script):
     add_custom_recipes({title:script})
+
 
 def add_custom_recipes(script_map):
     from calibre.web.feeds.recipes import custom_recipes, \
@@ -190,6 +197,7 @@ def remove_custom_recipe(id_):
         except:
             pass
 
+
 def get_custom_recipe(id_):
     from calibre.web.feeds.recipes import custom_recipes
     id_ = str(int(id_))
@@ -200,8 +208,10 @@ def get_custom_recipe(id_):
         with open(os.path.join(bdir, fname), 'rb') as f:
             return f.read().decode('utf-8')
 
+
 def get_builtin_recipe_titles():
     return [r.get('title') for r in get_builtin_recipe_collection()]
+
 
 def download_builtin_recipe(urn):
     from calibre.utils.config_base import prefs
@@ -210,9 +220,11 @@ def download_builtin_recipe(urn):
     return bz2.decompress(get_https_resource_securely(
         'https://code.calibre-ebook.com/recipe-compressed/'+urn, headers={'CALIBRE-INSTALL-UUID':prefs['installation_uuid']}))
 
+
 def get_builtin_recipe(urn):
     with zipfile.ZipFile(P('builtin_recipes.zip', allow_user_override=False), 'r') as zf:
         return zf.read(urn+'.recipe')
+
 
 def get_builtin_recipe_by_title(title, log=None, download_recipe=False):
     for x in get_builtin_recipe_collection():
@@ -232,6 +244,7 @@ def get_builtin_recipe_by_title(title, log=None, download_recipe=False):
                         'Failed to download recipe, using builtin version')
             return get_builtin_recipe(urn)
 
+
 def get_builtin_recipe_by_id(id_, log=None, download_recipe=False):
     for x in get_builtin_recipe_collection():
         if x.get('id') == id_:
@@ -249,6 +262,7 @@ def get_builtin_recipe_by_id(id_, log=None, download_recipe=False):
                         log.exception(
                         'Failed to download recipe, using builtin version')
             return get_builtin_recipe(urn)
+
 
 class SchedulerConfig(object):
 
@@ -292,13 +306,13 @@ class SchedulerConfig(object):
                     ld = x.get('last_downloaded', None)
                     if ld and last_downloaded is None:
                         try:
-                            last_downloaded = parse_date(ld)
-                        except:
+                            last_downloaded = parse_iso8601(ld)
+                        except Exception:
                             pass
                     self.root.remove(x)
                     break
             if last_downloaded is None:
-                last_downloaded = fromordinal(1)
+                last_downloaded = EPOCH
             sr = E.scheduled_recipe({
                 'id' : recipe.get('id'),
                 'title': recipe.get('title'),
@@ -397,7 +411,11 @@ class SchedulerConfig(object):
                     days = list(map(int, [x.strip() for x in
                         parts[0].split(',')]))
                     sch = [days, int(parts[1]), int(parts[2])]
-                return typ, sch, parse_date(recipe.get('last_downloaded'))
+                try:
+                    ld = parse_iso8601(recipe.get('last_downloaded'))
+                except Exception:
+                    ld = UNDEFINED_DATE
+                return typ, sch, ld
 
     def recipe_needs_to_be_downloaded(self, recipe):
         try:
@@ -420,14 +438,20 @@ class SchedulerConfig(object):
             return utcnow() - ld > timedelta(sch)
         elif typ == 'day/time':
             now = nowf()
-            ld_local = ld.astimezone(tzlocal())
+            try:
+                ld_local = ld.astimezone(local_tz)
+            except Exception:
+                return False
             day, hour, minute = sch
             return is_weekday(day, now) and \
                     not was_downloaded_already_today(ld_local, now) and \
                     is_time(now, hour, minute)
         elif typ == 'days_of_week':
             now = nowf()
-            ld_local = ld.astimezone(tzlocal())
+            try:
+                ld_local = ld.astimezone(local_tz)
+            except Exception:
+                return False
             days, hour, minute = sch
             have_day = False
             for day in days:
@@ -439,7 +463,10 @@ class SchedulerConfig(object):
                     is_time(now, hour, minute)
         elif typ == 'days_of_month':
             now = nowf()
-            ld_local = ld.astimezone(tzlocal())
+            try:
+                ld_local = ld.astimezone(local_tz)
+            except Exception:
+                return False
             days, hour, minute = sch
             have_day = now.day in days
             return have_day and \

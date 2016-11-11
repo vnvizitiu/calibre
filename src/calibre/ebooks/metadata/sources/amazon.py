@@ -12,12 +12,17 @@ from threading import Thread
 from Queue import Queue, Empty
 
 
-from calibre import as_unicode, random_user_agent
+from calibre import as_unicode
 from calibre.ebooks.metadata import check_isbn
 from calibre.ebooks.metadata.sources.base import (Source, Option, fixcase,
         fixauthors)
 from calibre.ebooks.metadata.book.base import Metadata
 from calibre.utils.localization import canonicalize_lang
+
+
+class CaptchaError(Exception):
+    pass
+
 
 def parse_details_page(url, log, timeout, browser, domain):
     from calibre.utils.cleantext import clean_ascii_chars
@@ -59,7 +64,7 @@ def parse_details_page(url, log, timeout, browser, domain):
     if domain == 'jp':
         for a in root.xpath('//a[@href]'):
             if 'black-curtain-redirect.html' in a.get('href'):
-                url = 'http://amazon.co.jp'+a.get('href')
+                url = 'https://amazon.co.jp'+a.get('href')
                 log('Black curtain redirect found, following')
                 return parse_details_page(url, log, timeout, browser, domain)
 
@@ -73,6 +78,7 @@ def parse_details_page(url, log, timeout, browser, domain):
     from css_selectors import Select
     selector = Select(root)
     return oraw, root, selector
+
 
 def parse_asin(root, log, url):
     try:
@@ -299,6 +305,8 @@ class Worker(Thread):  # Get details {{{
 
     def parse_details(self, raw, root):
         asin = parse_asin(root, self.log, self.url)
+        if not asin and root.xpath('//form[@action="/errors/validateCaptcha"]'):
+            raise CaptchaError('Amazon returned a CAPTCHA page, probably because you downloaded too many books. Wait for some time and try again.')
         if self.testing:
             import tempfile, uuid
             with tempfile.NamedTemporaryFile(prefix=(asin or str(uuid.uuid4()))+ '_',
@@ -544,15 +552,47 @@ class Worker(Thread):  # Get details {{{
 
     def parse_series(self, root):
         ans = (None, None)
-        desc = root.xpath('//div[@id="ps-content"]/div[@class="buying"]')
-        if desc:
-            raw = self.tostring(desc[0], method='text', encoding=unicode)
-            raw = re.sub(r'\s+', ' ', raw)
-            match = self.series_pat.search(raw)
-            if match is not None:
-                s, i = match.group('series'), float(match.group('index'))
-                if s:
-                    ans = (s, i)
+
+        # This is found on the paperback/hardback pages for books on amazon.com
+        series = root.xpath('//div[@data-feature-name="seriesTitle"]')
+        if series:
+            series = series[0]
+            spans = series.xpath('./span')
+            if spans:
+                raw = self.tostring(spans[0], encoding=unicode, method='text', with_tail=False).strip()
+                m = re.search('\s+([0-9.]+)$', raw.strip())
+                if m is not None:
+                    series_index = float(m.group(1))
+                    s = series.xpath('./a[@id="series-page-link"]')
+                    if s:
+                        series = self.tostring(s[0], encoding=unicode, method='text', with_tail=False).strip()
+                        if series:
+                            ans = (series, series_index)
+        # This is found on Kindle edition pages on amazon.com
+        if ans == (None, None):
+            for span in root.xpath('//div[@id="aboutEbooksSection"]//li/span'):
+                text = (span.text or '').strip()
+                m = re.match('Book\s+([0-9.]+)', text)
+                if m is not None:
+                    series_index = float(m.group(1))
+                    a = span.xpath('./a[@href]')
+                    if a:
+                        series = self.tostring(a[0], encoding=unicode, method='text', with_tail=False).strip()
+                        if series:
+                            ans = (series, series_index)
+        if ans == (None, None):
+            desc = root.xpath('//div[@id="ps-content"]/div[@class="buying"]')
+            if desc:
+                raw = self.tostring(desc[0], method='text', encoding=unicode)
+                raw = re.sub(r'\s+', ' ', raw)
+                match = self.series_pat.search(raw)
+                if match is not None:
+                    s, i = match.group('series'), float(match.group('index'))
+                    if s:
+                        ans = (s, i)
+        if ans[0]:
+            ans = (re.sub(r'\s+Series$', '', ans[0]).strip(), ans[1])
+            ans = (re.sub(r'\(.+?\s+Series\)$', '', ans[0]).strip(), ans[1])
         return ans
 
     def parse_tags(self, root):
@@ -605,34 +645,34 @@ class Worker(Thread):  # Get details {{{
 
         imgs = root.xpath('//img[(@id="prodImage" or @id="original-main-image" or @id="main-image" or @id="main-image-nonjs") and @src]')
         if not imgs:
-            imgs = root.xpath('//div[@class="main-image-inner-wrapper"]/img[@src]')
-            if not imgs:
-                imgs = root.xpath('//div[@id="main-image-container"]//img[@src]')
-                if not imgs:
-                    imgs = root.xpath('//div[@id="mainImageContainer"]//img[@data-a-dynamic-image]')
-                    for img in imgs:
-                        try:
-                            idata = json.loads(img.get('data-a-dynamic-image'))
-                        except Exception:
-                            imgs = ()
-                        else:
-                            mwidth = 0
-                            try:
-                                url = None
-                                for iurl, (width, height) in idata.iteritems():
-                                    if width > mwidth:
-                                        mwidth = width
-                                        url = iurl
-                                return url
-                            except Exception:
-                                pass
+            imgs = (
+                root.xpath('//div[@class="main-image-inner-wrapper"]/img[@src]') or
+                root.xpath('//div[@id="main-image-container" or @id="ebooks-main-image-container"]//img[@src]') or
+                root.xpath('//div[@id="mainImageContainer"]//img[@data-a-dynamic-image]')
+            )
+            for img in imgs:
+                try:
+                    idata = json.loads(img.get('data-a-dynamic-image'))
+                except Exception:
+                    imgs = ()
+                else:
+                    mwidth = 0
+                    try:
+                        url = None
+                        for iurl, (width, height) in idata.iteritems():
+                            if width > mwidth:
+                                mwidth = width
+                                url = iurl
+                        return url
+                    except Exception:
+                        pass
 
         for img in imgs:
             src = img.get('src')
             if 'data:' in src:
                 continue
             if 'loading-' in src:
-                js_img = re.search(br'"largeImage":"(http://[^"]+)",',raw)
+                js_img = re.search(br'"largeImage":"(https?://[^"]+)",',raw)
                 if js_img:
                     src = js_img.group(1).decode('utf-8')
             if ('/no-image-avail' not in src and 'loading-' not in src and '/no-img-sm' not in src):
@@ -711,6 +751,7 @@ class Worker(Thread):  # Get details {{{
                     return ans
 # }}}
 
+
 class Amazon(Source):
 
     name = 'Amazon.com'
@@ -764,9 +805,8 @@ class Amazon(Source):
 
     @property
     def user_agent(self):
-        # Pass in an index to random_user_agent() to test with a particular
-        # user agent
-        return random_user_agent()
+        # IE 11 - windows 7
+        return 'Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko'
 
     def save_settings(self, *args, **kwargs):
         Source.save_settings(self, *args, **kwargs)
@@ -796,13 +836,13 @@ class Amazon(Source):
         if domain and asin:
             url = None
             if domain == 'com':
-                url = 'http://amzn.com/'+asin
+                url = 'https://amzn.com/'+asin
             elif domain == 'uk':
-                url = 'http://www.amazon.co.uk/dp/'+asin
+                url = 'https://www.amazon.co.uk/dp/'+asin
             elif domain == 'br':
-                url = 'http://www.amazon.com.br/dp/'+asin
+                url = 'https://www.amazon.com.br/dp/'+asin
             else:
-                url = 'http://www.amazon.%s/dp/%s'%(domain, asin)
+                url = 'https://www.amazon.%s/dp/%s'%(domain, asin)
             if url:
                 idtype = 'amazon' if domain == 'com' else 'amazon_'+domain
                 return domain, idtype, asin, url
@@ -835,11 +875,24 @@ class Amazon(Source):
             (mi.is_null('language') and self.domain in {'com', 'uk'})
         )
         if mi.title and docase:
+            # Remove series information from title
+            m = re.search(r'\S+\s+(\(.+?\s+Book\s+\d+\))$', mi.title)
+            if m is not None:
+                mi.title = mi.title.replace(m.group(1), '').strip()
             mi.title = fixcase(mi.title)
         mi.authors = fixauthors(mi.authors)
         if mi.tags and docase:
             mi.tags = list(map(fixcase, mi.tags))
         mi.isbn = check_isbn(mi.isbn)
+        if mi.series and docase:
+            mi.series = fixcase(mi.series)
+        if mi.title and mi.series:
+            for pat in (r':\s*Book\s+\d+\s+of\s+%s$', r'\(%s\)$', r':\s*%s\s+Book\s+\d+$'):
+                pat = pat % re.escape(mi.series)
+                q = re.sub(pat, '', mi.title, flags=re.I).strip()
+                if q and q != mi.title:
+                    mi.title = q
+                    break
 
     def get_website_domain(self, domain):
         udomain = domain
@@ -915,7 +968,7 @@ class Amazon(Source):
         encoded_q = dict([(x.encode(encode_to, 'ignore'), y.encode(encode_to,
             'ignore')) for x, y in
             q.iteritems()])
-        url = 'http://www.amazon.%s/s/?'%self.get_website_domain(domain) + urlencode(encoded_q)
+        url = 'https://www.amazon.%s/s/?'%self.get_website_domain(domain) + urlencode(encoded_q)
         return url, domain
 
     # }}}
@@ -940,12 +993,15 @@ class Amazon(Source):
 
         def title_ok(title):
             title = title.lower()
-            bad = ['bulk pack', '[audiobook]', '[audio cd]', '(a book companion)', '( slipcase with door )']
+            bad = ['bulk pack', '[audiobook]', '[audio cd]', '(a book companion)', '( slipcase with door )', ': free sampler']
             if self.domain == 'com':
                 bad.extend(['(%s edition)' % x for x in ('spanish', 'german')])
             for x in bad:
                 if x in title:
                     return False
+            if title and title[0] in '[{' and re.search(r'\(\s*author\s*\)', title) is not None:
+                # Bad entries in the catalog
+                return False
             return True
 
         for a in root.xpath(r'//li[starts-with(@id, "result_")]//a[@href and contains(@class, "s-access-detail-page")]'):
@@ -953,7 +1009,7 @@ class Amazon(Source):
             if title_ok(title):
                 url = a.get('href')
                 if url.startswith('/'):
-                    url = 'http://www.amazon.%s%s' % (self.get_website_domain(domain), url)
+                    url = 'https://www.amazon.%s%s' % (self.get_website_domain(domain), url)
                 matches.append(url)
 
         if not matches:
@@ -968,7 +1024,7 @@ class Amazon(Source):
                     if title_ok(title):
                         url = a.get('href')
                         if url.startswith('/'):
-                            url = 'http://www.amazon.%s%s' % (self.get_website_domain(domain), url)
+                            url = 'https://www.amazon.%s%s' % (self.get_website_domain(domain), url)
                         matches.append(url)
                     break
 
@@ -982,9 +1038,11 @@ class Amazon(Source):
                     if title_ok(title):
                         url = a.get('href')
                         if url.startswith('/'):
-                            url = 'http://www.amazon.%s%s' % (self.get_website_domain(domain), url)
+                            url = 'https://www.amazon.%s%s' % (self.get_website_domain(domain), url)
                         matches.append(url)
                     break
+        if not matches and root.xpath('//form[@action="/errors/validateCaptcha"]'):
+            raise CaptchaError('Amazon returned a CAPTCHA page, probably because you downloaded too many books. Wait for some time and try again.')
 
         # Keep only the top 5 matches as the matches are sorted by relevance by
         # Amazon so lower matches are not likely to be very relevant
@@ -1150,12 +1208,22 @@ class Amazon(Source):
 if __name__ == '__main__':  # tests {{{
     # To run these test use: calibre-debug src/calibre/ebooks/metadata/sources/amazon.py
     from calibre.ebooks.metadata.sources.test import (test_identify_plugin,
-            isbn_test, title_test, authors_test, comments_test)
+            isbn_test, title_test, authors_test, comments_test, series_test)
     com_tests = [  # {{{
+
+            (   # Paperback with series
+                {'identifiers':{'amazon':'1423146786'}},
+                [title_test('The Heroes of Olympus, Book Five The Blood of Olympus', exact=True), series_test('Heroes of Olympus', 5)]
+            ),
+
+            (   # Kindle edition with series
+                {'identifiers':{'amazon':'B0085UEQDO'}},
+                [title_test('Three Parts Dead', exact=True), series_test('Craft Sequence', 1)]
+            ),
 
             (   # A kindle edition that does not appear in the search results when searching by ASIN
                 {'identifiers':{'amazon':'B004JHY6OG'}},
-                [title_test('The Heroes: A First Law Novel', exact=True)]
+                [title_test('The Heroes: A First Law Novel (First Law World 2)', exact=True)]
             ),
 
             (  # + in title and uses id="main-image" for cover

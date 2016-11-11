@@ -9,16 +9,17 @@ __docformat__ = 'restructuredtext en'
 import os
 from urlparse import urlparse
 
-from PyQt5.Qt import QNetworkCookieJar, QNetworkProxy, QUrl
+from PyQt5.Qt import QNetworkCookieJar, QNetworkProxy
 from PyQt5.QtWebKitWidgets import QWebView, QWebPage
 
 from calibre import USER_AGENT, get_proxies
 from calibre.ebooks import BOOK_EXTENSIONS
-from calibre.gui2 import choose_save_file
+from calibre.gui2 import choose_save_file, NO_URL_FORMATTING
 from calibre.gui2.ebook_download import show_download_info
 from calibre.ptempfile import PersistentTemporaryFile
 from calibre.utils.filenames import ascii_filename
 from calibre.web import get_download_filename
+
 
 class NPWebView(QWebView):
 
@@ -69,7 +70,7 @@ class NPWebView(QWebView):
         if not self.gui:
             return
 
-        url = unicode(request.url().toString(QUrl.None))
+        url = unicode(request.url().toString(NO_URL_FORMATTING))
         cf = self.get_cookies()
 
         filename = get_download_filename(url, cf)

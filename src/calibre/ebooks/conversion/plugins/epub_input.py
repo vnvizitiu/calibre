@@ -11,6 +11,7 @@ from calibre.customize.conversion import InputFormatPlugin, OptionRecommendation
 ADOBE_OBFUSCATION =  'http://ns.adobe.com/pdf/enc#RC'
 IDPF_OBFUSCATION = 'http://www.idpf.org/2008/embedding'
 
+
 def decrypt_font_data(key, data, algorithm):
     is_adobe = algorithm == ADOBE_OBFUSCATION
     crypt_len = 1024 if is_adobe else 1040
@@ -19,10 +20,12 @@ def decrypt_font_data(key, data, algorithm):
     decrypt = bytes(bytearray(x^key.next() for x in crypt))
     return decrypt + data[crypt_len:]
 
+
 def decrypt_font(key, path, algorithm):
     with open(path, 'r+b') as f:
         data = decrypt_font_data(key, f.read(), algorithm)
         f.seek(0), f.truncate(), f.write(data)
+
 
 class EPUBInput(InputFormatPlugin):
 
@@ -39,7 +42,7 @@ class EPUBInput(InputFormatPlugin):
         import uuid, hashlib
         idpf_key = opf.raw_unique_identifier
         if idpf_key:
-            idpf_key = re.sub(u'\u0020\u0009\u000d\u000a', u'', idpf_key)
+            idpf_key = re.sub(u'[\u0020\u0009\u000d\u000a]', u'', idpf_key)
             idpf_key = hashlib.sha1(idpf_key.encode('utf-8')).digest()
         key = None
         for item in opf.identifier_iter():
@@ -76,7 +79,51 @@ class EPUBInput(InputFormatPlugin):
             traceback.print_exc()
         return False
 
-    def rationalize_cover(self, opf, log):
+    def set_guide_type(self, opf, gtype, href=None, title=''):
+        # Set the titlepage guide entry
+        for elem in list(opf.iterguide()):
+            if elem.get('type', '').lower() == 'titlepage':
+                elem.getparent().remove(elem)
+
+        if href is not None:
+            t = opf.create_guide_item(gtype, title, href)
+            for guide in opf.root.iterchildren('guide'):
+                guide.append(t)
+                return
+            guide = opf.create_guide_element()
+            opf.root.append(guide)
+            guide.append(t)
+            return t
+
+    def rationalize_cover3(self, opf, log):
+        ''' If there is a reference to the cover/titlepage via manifest properties, convert to
+        entries in the <guide> so that the rest of the pipeline picks it up. '''
+        from calibre.ebooks.metadata.opf3 import items_with_property
+        removed = None
+        raster_cover_href = opf.epub3_raster_cover
+        if raster_cover_href:
+            self.set_guide_type(opf, 'cover', raster_cover_href, 'Cover Image')
+        titlepage_id = titlepage_href = None
+        for item in items_with_property(opf.root, 'calibre:title-page'):
+            tid, href = item.get('id'), item.get('href')
+            if href and tid:
+                titlepage_id, titlepage_href = tid, href.partition('#')[0]
+                break
+        if titlepage_href is not None:
+            self.set_guide_type(opf, 'titlepage', titlepage_href, 'Title Page')
+            spine = list(opf.iterspine())
+            if len(spine) > 1:
+                for item in spine:
+                    if item.get('idref') == titlepage_id:
+                        log('Found HTML cover', titlepage_href)
+                        if self.for_viewer:
+                            item.attrib.pop('linear', None)
+                        else:
+                            item.getparent().remove(item)
+                            removed = titlepage_href
+                        return removed
+
+    def rationalize_cover2(self, opf, log):
         ''' Ensure that the cover information in the guide is correct. That
         means, at most one entry with type="cover" that points to a raster
         cover and at most one entry with type="titlepage" that points to an
@@ -149,18 +196,12 @@ class EPUBInput(InputFormatPlugin):
                         renderer)
 
         # Set the titlepage guide entry
-        for elem in list(opf.iterguide()):
-            if elem.get('type', '').lower() == 'titlepage':
-                elem.getparent().remove(elem)
-
-        t = etree.SubElement(guide_elem.getparent(), OPF('reference'))
-        t.set('type', 'titlepage')
-        t.set('href', guide_cover)
-        t.set('title', 'Title Page')
+        self.set_guide_type(opf, 'titlepage', guide_cover, 'Title Page')
         return removed
 
     def find_opf(self):
         from lxml import etree
+
         def attr(n, attr):
             for k, v in n.attrib.items():
                 if k.endswith(attr):
@@ -218,6 +259,10 @@ class EPUBInput(InputFormatPlugin):
                 raise DRMError(os.path.basename(path))
         self.encrypted_fonts = self._encrypted_font_uris
 
+        epub3_nav = opf.epub3_nav
+        if epub3_nav is not None:
+            self.convert_epub3_nav(epub3_nav, opf, log)
+
         if len(parts) > 1 and parts[0]:
             delta = '/'.join(parts[:-1])+'/'
             for elem in opf.itermanifest():
@@ -225,7 +270,8 @@ class EPUBInput(InputFormatPlugin):
             for elem in opf.iterguide():
                 elem.set('href', delta+elem.get('href'))
 
-        self.removed_cover = self.rationalize_cover(opf, log)
+        f = self.rationalize_cover3 if opf.package_version >= 3.0 else self.rationalize_cover2
+        self.removed_cover = f(opf, log)
 
         for x in opf.itermanifest():
             if x.get('media-type', '') == 'application/x-dtbook+xml':
@@ -252,10 +298,64 @@ class EPUBInput(InputFormatPlugin):
         if len(list(opf.iterspine())) == 0:
             raise ValueError('No valid entries in the spine of this EPUB')
 
-        with open('content.opf', 'wb') as nopf:
+        with lopen('content.opf', 'wb') as nopf:
             nopf.write(opf.render())
 
         return os.path.abspath(u'content.opf')
+
+    def convert_epub3_nav(self, nav_path, opf, log):
+        from lxml import etree
+        from calibre.ebooks.chardet import xml_to_unicode
+        from calibre.ebooks.oeb.polish.parsing import parse
+        from calibre.ebooks.oeb.base import EPUB_NS, XHTML, NCX_MIME, NCX
+        from calibre.ebooks.oeb.polish.toc import first_child
+        from tempfile import NamedTemporaryFile
+        with lopen(nav_path, 'rb') as f:
+            raw = f.read()
+        raw = xml_to_unicode(raw, strip_encoding_pats=True, assume_utf8=True)[0]
+        root = parse(raw, log=log)
+        ncx = etree.fromstring('<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="eng"><navMap/></ncx>')
+        navmap = ncx[0]
+        et = '{%s}type' % EPUB_NS
+        bn = os.path.basename(nav_path)
+
+        def add_from_li(li, parent):
+            href = text = None
+            for x in li.iterchildren(XHTML('a'), XHTML('span')):
+                text = etree.tostring(x, method='text', encoding=unicode, with_tail=False).strip() or ' '.join(x.xpath('descendant-or-self::*/@title')).strip()
+                href = x.get('href')
+                if href:
+                    if href.startswith('#'):
+                        href = bn + href
+                break
+            np = parent.makeelement(NCX('navPoint'))
+            parent.append(np)
+            np.append(np.makeelement(NCX('navLabel')))
+            np[0].append(np.makeelement(NCX('text')))
+            np[0][0].text = text
+            if href:
+                np.append(np.makeelement(NCX('content'), attrib={'src':href}))
+            return np
+
+        def process_nav_node(node, toc_parent):
+            for li in node.iterchildren(XHTML('li')):
+                child = add_from_li(li, toc_parent)
+                ol = first_child(li, XHTML('ol'))
+                if child is not None and ol is not None:
+                    process_nav_node(ol, child)
+
+        for nav in root.iterdescendants(XHTML('nav')):
+            if nav.get(et) == 'toc':
+                ol = first_child(nav, XHTML('ol'))
+                if ol is not None:
+                    process_nav_node(ol, navmap)
+                    break
+
+        with NamedTemporaryFile(suffix='.ncx', dir=os.path.dirname(nav_path), delete=False) as f:
+            f.write(etree.tostring(ncx, encoding='utf-8'))
+        ncx_id = opf.add_path_to_manifest(f.name, NCX_MIME)
+        for spine in opf.root.xpath('//*[local-name()="spine"]'):
+            spine.set('toc', ncx_id)
 
     def postprocess_book(self, oeb, opts, log):
         rc = getattr(self, 'removed_cover', None)

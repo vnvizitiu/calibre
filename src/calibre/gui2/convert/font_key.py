@@ -11,6 +11,7 @@ from PyQt5.Qt import QDialog
 from calibre.gui2.convert.font_key_ui import Ui_Dialog
 from calibre.utils.localization import localize_user_manual_link
 
+
 class FontKeyChooser(QDialog, Ui_Dialog):
 
     def __init__(self, parent=None, base_font_size=0.0, font_key=None):
@@ -18,7 +19,7 @@ class FontKeyChooser(QDialog, Ui_Dialog):
         self.setupUi(self)
         try:
             self.wh_label.setText(self.wh_label.text() % localize_user_manual_link(
-                'http://manual.calibre-ebook.com/conversion.html#font-size-rescaling'))
+                'https://manual.calibre-ebook.com/conversion.html#font-size-rescaling'))
         except TypeError:
             pass  # link already localized
 

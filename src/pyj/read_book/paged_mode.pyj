@@ -106,19 +106,35 @@ def layout(is_single_page):
     nonlocal _in_paged_mode, col_width, col_and_gap, screen_height, gap, screen_width, is_full_screen_layout, cols_per_screen
     body_style = window.getComputedStyle(document.body)
     first_layout = not _in_paged_mode
+    cps = opts.columns_per_screen or {}
+    cps = cps.landscape if window.innerWidth > window.innerHeight else cps.portrait
+    try:
+        cps = int(cps)
+    except:
+        cps = 0
+    if not cps:
+        cps = int(Math.floor(window.innerWidth / 500.0))
+    cps = max(1, min(cps or 1, 20))
     if first_layout:
         handle_rtl_body(body_style)
         # Check if the current document is a full screen layout like
         # cover, if so we treat it specially.
         single_screen = (document.body.scrollHeight < window.innerHeight + 75)
         first_layout = True
-        if not single_screen and opts.cols_per_screen > 1:
-            num = opts.cols_per_screen - 1
+        if not single_screen and cps > 1:
+            num = cps - 1
+            elems = document.querySelectorAll('body > *')
+            if elems.length == 1:
+                # Workaround for the case when the content is wrapped in a
+                # 100% height <div>. This causes the generated page divs to
+                # not be in the correct location, at least in WebKit. See
+                # https://bugs.launchpad.net/bugs/1594657 for an example.
+                elems[0].style.height = 'auto'
             while num > 0:
                 num -= 1
                 create_page_div()
 
-    n = cols_per_screen = opts.cols_per_screen
+    n = cols_per_screen = cps
     # Calculate the column width so that cols_per_screen columns fit exactly in
     # the window width, with their separator margins
     ww = col_width = screen_width = window.innerWidth
@@ -142,13 +158,8 @@ def layout(is_single_page):
     # above the columns, which causes them to effectively be added to the
     # page margins (the margin collapse algorithm)
     document.body.style.setProperty('-webkit-margin-collapse', 'separate')
-    # Remove any webkit specified default margin from the first child of body
-    # Otherwise, you could end up with an effective negative margin, I dont
-    # understand exactly why, but see:
-    # https://bugs.launchpad.net/calibre/+bug/1082640 for an example
     c = first_child(document.body)
     if c:
-        c.style.setProperty('-webkit-margin-before', '0')
         # Remove page breaks on the first few elements to prevent blank pages
         # at the start of a chapter
         set_css(c, break_before='avoid')
@@ -213,7 +224,7 @@ def scroll_to_column(number, animated=False, notify=False, duration=1000):
 def scroll_to_xpos(xpos, animated=False, notify=False, duration=1000):
     # Scroll so that the column containing xpos is the left most column in
     # the viewport
-    if type(xpos) is not 'number':
+    if jstype(xpos) is not 'number':
         print(xpos, 'is not a number, cannot scroll to it!')
         return
     if is_full_screen_layout:
@@ -397,9 +408,9 @@ def snap_to_selection():
         # selection
         scroll_to_xpos(left+5)
 
-def jump_to_cfi(cfi, job_id=-1):
+def jump_to_cfi(cfi):
     # Jump to the position indicated by the specified conformal fragment
-    # indicator (requires the cfi.coffee library). When in paged mode, the
+    # indicator. When in paged mode, the
     # scroll is performed so that the column containing the position
     # pointed to by the cfi is the left most column in the viewport
     cfi_scroll_to(cfi, def(x, y):
@@ -407,8 +418,6 @@ def jump_to_cfi(cfi, job_id=-1):
             scroll_to_xpos(x)
         else:
             window.scrollTo(0, y)
-        # if window.py_bridge
-        #     window.py_bridge.jump_to_cfi_finished(job_id)
     )
 
 def current_cfi():
@@ -472,7 +481,7 @@ def onkeydown(evt):
             window.scrollTo(0 if key is 'left' else document_width(), 0)
         else:
             scroll_by_page(key is 'up', True)
-    elif key is 'left' or key is 'right':
+    elif (key is 'left' or key is 'right') and not evt.altKey:
         handled = True
         if evt.ctrlKey:
             window.scrollTo(0 if key is 'left' else document_width(), 0)
@@ -492,3 +501,15 @@ def onkeydown(evt):
         scroll_by_page(key is 'pageup', True)
     if handled:
         evt.preventDefault()
+
+def handle_gesture(gesture):
+    if gesture.type is 'swipe':
+        if gesture.axis is 'vertical':
+            pass  # TODO: next/prev section
+        else:
+            if not gesture.active or gesture.is_held:
+                scroll_by_page(gesture.direction is 'right', True)
+    elif gesture.type is 'prev-page':
+        scroll_by_page(True, False)
+    elif gesture.type is 'next-page':
+        scroll_by_page(False, False)

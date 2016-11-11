@@ -52,6 +52,7 @@ from calibre.gui2.dbus_export.widgets import factory
 from calibre.gui2.open_with import register_keyboard_shortcuts
 from calibre.library import current_library_name
 
+
 class Listener(Thread):  # {{{
 
     def __init__(self, listener):
@@ -85,25 +86,27 @@ class Listener(Thread):  # {{{
 
 _gui = None
 
+
 def get_gui():
     return _gui
 
+
 def add_quick_start_guide(library_view, refresh_cover_browser=None):
     from calibre.ebooks.metadata.meta import get_metadata
-    from calibre.ebooks import calibre_cover
+    from calibre.ebooks.covers import calibre_cover2
     from calibre.utils.zipfile import safe_replace
     from calibre.utils.localization import get_lang, canonicalize_lang
     from calibre.ptempfile import PersistentTemporaryFile
     l = canonicalize_lang(get_lang()) or 'eng'
     gprefs['quick_start_guide_added'] = True
-    imgbuf = BytesIO(calibre_cover(_('Quick Start Guide'), '', author_size=8))
+    imgbuf = BytesIO(calibre_cover2(_('Quick Start Guide'), ''))
     try:
-        with open(P('quick_start/%s.epub' % l), 'rb') as src:
+        with lopen(P('quick_start/%s.epub' % l), 'rb') as src:
             buf = BytesIO(src.read())
     except EnvironmentError as err:
         if err.errno != errno.ENOENT:
             raise
-        with open(P('quick_start/eng.epub'), 'rb') as src:
+        with lopen(P('quick_start/eng.epub'), 'rb') as src:
             buf = BytesIO(src.read())
     safe_replace(buf, 'images/cover.jpg', imgbuf)
     buf.seek(0)
@@ -129,10 +132,12 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
 
     proceed_requested = pyqtSignal(object, object)
     book_converted = pyqtSignal(object, object)
+    shutting_down = False
 
     def __init__(self, opts, parent=None, gui_debug=None):
         global _gui
         MainWindow.__init__(self, opts, parent=parent, disable_automatic_gc=True)
+        self.setWindowIcon(QApplication.instance().windowIcon())
         self.jobs_pointer = Pointer(self)
         self.proceed_requested.connect(self.do_proceed,
                 type=Qt.QueuedConnection)
@@ -260,9 +265,9 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         if config['systray_icon']:
             self.system_tray_icon = factory(app_id='com.calibre-ebook.gui').create_system_tray_icon(parent=self, title='calibre')
         if self.system_tray_icon is not None:
-            self.system_tray_icon.setIcon(QIcon(I('lt.png')))
+            self.system_tray_icon.setIcon(QIcon(I('lt.png', allow_user_override=False)))
             if not (iswindows or isosx):
-                self.system_tray_icon.setIcon(QIcon.fromTheme('calibre-gui', QIcon(I('lt.png'))))
+                self.system_tray_icon.setIcon(QIcon.fromTheme('calibre-gui', self.system_tray_icon.icon()))
             self.system_tray_icon.setToolTip(self.jobs_button.tray_tooltip())
             self.system_tray_icon.setVisible(True)
             self.jobs_button.tray_tooltip_updated.connect(self.system_tray_icon.setToolTip)
@@ -336,15 +341,12 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         UpdateMixin.init_update_mixin(self, opts)
 
         # ###################### Search boxes ########################
-        SearchRestrictionMixin.init_search_restirction_mixin(self)
+        SearchRestrictionMixin.init_search_restriction_mixin(self)
         SavedSearchBoxMixin.init_saved_seach_box_mixin(self)
 
         # ###################### Library view ########################
         LibraryViewMixin.init_library_view_mixin(self, db)
         SearchBoxMixin.init_search_box_mixin(self)  # Requires current_db
-
-        if show_gui:
-            self.show()
 
         if self.system_tray_icon is not None and self.system_tray_icon.isVisible() and opts.start_in_tray:
             self.hide_windows()
@@ -368,6 +370,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
 
         # ########################## Tags Browser ##############################
         TagBrowserMixin.init_tag_browser_mixin(self, db)
+        self.library_view.model().database_changed.connect(self.populate_tb_manage_menu, type=Qt.QueuedConnection)
 
         # ######################## Search Restriction ##########################
         if db.prefs['virtual_lib_on_startup']:
@@ -396,9 +399,8 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         if config['autolaunch_server']:
             self.start_content_server()
 
-        self.keyboard_interrupt.connect(self.quit, type=Qt.QueuedConnection)
-
         self.read_settings()
+
         self.finalize_layout()
         if self.bars_manager.showing_donate:
             self.donate_button.start_animation()
@@ -417,13 +419,17 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
 
         register_keyboard_shortcuts()
         self.keyboard.finalize()
+        if show_gui:
+            # Note this has to come after restoreGeometry() because of
+            # https://bugreports.qt.io/browse/QTBUG-56831
+            self.show()
         self.auto_adder = AutoAdder(gprefs['auto_add_path'], self)
-
         self.save_layout_state()
 
         # Collect cycles now
         gc.collect()
 
+        QApplication.instance().shutdown_signal_received.connect(self.quit)
         if show_gui and self.gui_debug is not None:
             QTimer.singleShot(10, self.show_gui_debug_msg)
 
@@ -633,9 +639,6 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             olddb = self.library_view.model().db
             if copy_structure:
                 default_prefs = olddb.prefs
-
-            from calibre.utils.formatter_functions import unload_user_template_functions
-            unload_user_template_functions(olddb.library_id)
         except:
             olddb = None
         try:
@@ -842,6 +845,8 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
 
     def quit(self, checked=True, restart=False, debug_on_restart=False,
             confirm_quit=True):
+        if self.shutting_down:
+            return
         if confirm_quit and not self.confirm_quit():
             return
         try:
@@ -853,7 +858,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         QApplication.instance().quit()
 
     def donate(self, *args):
-        open_url(QUrl('http://calibre-ebook.com/donate'))
+        open_url(QUrl('https://calibre-ebook.com/donate'))
 
     def confirm_quit(self):
         if self.job_manager.has_jobs():
@@ -883,6 +888,7 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         return True
 
     def shutdown(self, write_settings=True):
+        self.shutting_down = True
         self.show_shutdown_message()
 
         from calibre.customize.ui import has_library_closed_plugins
@@ -917,6 +923,18 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         self.job_manager.threaded_server.close()
         self.device_manager.keep_going = False
         self.auto_adder.stop()
+        # Do not report any errors that happen after the shutdown
+        # We cannot restore the original excepthook as that causes PyQt to
+        # call abort() on unhandled exceptions
+        import traceback
+
+        def eh(t, v, tb):
+            try:
+                traceback.print_exception(t, v, tb, file=sys.stderr)
+            except:
+                pass
+        sys.excepthook = eh
+
         mb = self.library_view.model().metadata_backup
         if mb is not None:
             mb.stop()
@@ -940,8 +958,6 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
         except KeyboardInterrupt:
             pass
         self.hide_windows()
-        # Do not report any errors that happen after the shutdown
-        sys.excepthook = sys.__excepthook__
         if self._spare_pool is not None:
             self._spare_pool.shutdown()
         from calibre.db.delete_service import shutdown
@@ -961,6 +977,8 @@ class Main(MainWindow, MainWindowMixin, DeviceMixin, EmailMixin,  # {{{
             QApplication.instance().quit()
 
     def closeEvent(self, e):
+        if self.shutting_down:
+            return
         self.write_settings()
         if self.system_tray_icon is not None and self.system_tray_icon.isVisible():
             if not dynamic['systray_msg'] and not isosx:

@@ -40,14 +40,17 @@ various stages of conversion. The stages are:
 
 '''
 
+
 def supported_input_formats():
     fmts = available_input_formats()
     for x in ('zip', 'rar', 'oebzip'):
         fmts.add(x)
     return fmts
 
+
 class OptionValues(object):
     pass
+
 
 class CompositeProgressReporter(object):
 
@@ -61,6 +64,7 @@ class CompositeProgressReporter(object):
         self.global_reporter(global_frac, msg)
 
 ARCHIVE_FMTS = ('zip', 'rar', 'oebzip')
+
 
 class Plumber(object):
 
@@ -773,7 +777,7 @@ OptionRecommendation(name='search_replace',
         # plugins.
         for w in ('input_options', 'output_options',
                 'all_format_options'):
-            temp = set([])
+            temp = set()
             for x in getattr(self, w):
                 temp.add(x.clone())
             setattr(self, w, temp)
@@ -831,13 +835,16 @@ OptionRecommendation(name='search_replace',
         if help is not None:
             return help.replace('%default', str(rec.recommended_value))
 
+    def merge_plugin_recs(self, plugin):
+        for name, val, level in plugin.recommendations:
+            rec = self.get_option_by_name(name)
+            if rec is not None and rec.level <= level:
+                rec.recommended_value = val
+                rec.level = level
+
     def merge_plugin_recommendations(self):
         for source in (self.input_plugin, self.output_plugin):
-            for name, val, level in source.recommendations:
-                rec = self.get_option_by_name(name)
-                if rec is not None and rec.level <= level:
-                    rec.recommended_value = val
-                    rec.level = level
+            self.merge_plugin_recs(source)
 
     def merge_ui_recommendations(self, recommendations):
         '''
@@ -1104,7 +1111,7 @@ OptionRecommendation(name='search_replace',
         pr(0.35)
         self.flush()
 
-        if self.output_plugin.file_type != 'epub':
+        if self.output_plugin.file_type not in ('epub', 'kepub'):
             # Remove the toc reference to the html cover, if any, except for
             # epub, as the epub output plugin will do the right thing with it.
             item = getattr(self.oeb.toc, 'item_that_refers_to_cover', None)
@@ -1227,9 +1234,12 @@ OptionRecommendation(name='search_replace',
 # This has to be global as create_oebbook can be called from other locations
 # (for example in the html input plugin)
 regex_wizard_callback = None
+
+
 def set_regex_wizard_callback(f):
     global regex_wizard_callback
     regex_wizard_callback = f
+
 
 def create_oebbook(log, path_or_stream, opts, reader=None,
         encoding='utf-8', populate=True, for_regex_wizard=False, specialize=None):

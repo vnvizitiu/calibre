@@ -9,13 +9,15 @@ __copyright__ = '2013, Kovid Goyal <kovid at kovidgoyal.net>'
 import sys
 
 from PyQt5.Qt import (
-     QIcon, Qt, QSplitter, QListWidget, QTextBrowser, QPalette, QUrl, QMenu,
+     QIcon, Qt, QSplitter, QListWidget, QTextBrowser, QPalette, QMenu,
      QListWidgetItem, pyqtSignal, QApplication, QStyledItemDelegate)
 
 from calibre.ebooks.oeb.polish.check.base import WARN, INFO, DEBUG, ERROR, CRITICAL
 from calibre.ebooks.oeb.polish.check.main import run_checks, fix_errors
+from calibre.gui2 import NO_URL_FORMATTING
 from calibre.gui2.tweak_book import tprefs
 from calibre.gui2.tweak_book.widgets import BusyCursor
+
 
 def icon_for_level(level):
     if level > WARN:
@@ -27,6 +29,7 @@ def icon_for_level(level):
     else:
         icon = None
     return QIcon(I(icon)) if icon else QIcon()
+
 
 def prefix_for_level(level):
     if level > WARN:
@@ -41,6 +44,7 @@ def prefix_for_level(level):
         text += ': '
     return text
 
+
 class Delegate(QStyledItemDelegate):
 
     def initStyleOption(self, option, index):
@@ -48,6 +52,7 @@ class Delegate(QStyledItemDelegate):
         if index.row() == self.parent().currentRow():
             option.font.setBold(True)
             option.backgroundBrush = self.parent().palette().brush(QPalette.AlternateBase)
+
 
 class Check(QSplitter):
 
@@ -111,7 +116,7 @@ class Check(QSplitter):
             msg, _('Click to run a check on the book'), _('Run check')))
 
     def link_clicked(self, url):
-        url = unicode(url.toString(QUrl.None))
+        url = unicode(url.toString(NO_URL_FORMATTING))
         if url == 'activate:item':
             self.current_item_activated()
         elif url == 'run:check':
@@ -154,6 +159,7 @@ class Check(QSplitter):
     def current_item_changed(self, *args):
         i = self.items.currentItem()
         self.help.setText('')
+
         def loc_to_string(line, col):
             loc = ''
             if line is not None:
@@ -239,6 +245,7 @@ class Check(QSplitter):
     def clear(self):
         self.items.clear()
         self.clear_help()
+
 
 def main():
     from calibre.gui2 import Application

@@ -21,13 +21,9 @@ from setup.build_environment import sw as SW, QT_FRAMEWORKS, QT_PLUGINS, PYQT_MO
 from setup.installer.osx.app.sign import current_dir, sign_app
 
 LICENSE = open('LICENSE', 'rb').read()
-MAGICK_HOME='@executable_path/../Frameworks/ImageMagick'
 ENV = dict(
         FONTCONFIG_PATH='@executable_path/../Resources/fonts',
         FONTCONFIG_FILE='@executable_path/../Resources/fonts/fonts.conf',
-        MAGICK_CONFIGURE_PATH=MAGICK_HOME+'/config-Q16',
-        MAGICK_CODER_MODULE_PATH=MAGICK_HOME+'/modules-Q16/coders',
-        MAGICK_CODER_FILTER_PATH=MAGICK_HOME+'/modules-Q16/filters',
         QT_PLUGIN_PATH='@executable_path/../MacOS/qt-plugins',
         PYTHONIOENCODING='UTF-8',
         SSL_CERT_FILE='@executable_path/../Resources/resources/mozilla-ca-certs.pem',
@@ -199,7 +195,6 @@ class Py2App(object):
             self.add_poppler()
             self.add_imaging_libs()
             self.add_fontconfig()
-            self.add_imagemagick()
             self.add_misc_libraries()
 
             self.add_resources()
@@ -391,7 +386,7 @@ class Py2App(object):
                 NSAppleScriptEnabled=False,
                 NSHumanReadableCopyright=time.strftime('Copyright %Y, Kovid Goyal'),
                 CFBundleGetInfoString=('calibre, an E-book management '
-                'application. Visit http://calibre-ebook.com for details.'),
+                'application. Visit https://calibre-ebook.com for details.'),
                 CFBundleIconFile='calibre.icns',
                 NSHighResolutionCapable=True,
                 LSApplicationCategoryType='public.app-category.productivity',
@@ -455,27 +450,12 @@ class Py2App(object):
         open(fc, 'wb').write(raw)
 
     @flush
-    def add_imagemagick(self):
-        info('\nAdding ImageMagick')
-        for x in ('Wand-6', 'Core-6'):
-            self.install_dylib(os.path.join(SW, 'lib', 'libMagick%s.Q16.2.dylib'%x))
-        idir = glob.glob(os.path.join(SW, 'lib', 'ImageMagick-*'))[-1]
-        dest = os.path.join(self.frameworks_dir, 'ImageMagick')
-        if os.path.exists(dest):
-            shutil.rmtree(dest)
-        shutil.copytree(idir, dest, True)
-        for x in os.walk(dest):
-            for f in x[-1]:
-                if f.endswith('.so'):
-                    f = join(x[0], f)
-                    self.fix_dependencies_in_lib(f)
-
-    @flush
     def add_misc_libraries(self):
+        # Reminder to self to add iconv.dylib in the new freeze code
         for x in (
                 'usb-1.0.0', 'mtp.9', 'ltdl.7', 'chm.0', 'sqlite3.0',
                 'icudata.53', 'icui18n.53', 'icuio.53', 'icuuc.53',
-                'crypto.1.0.0', 'ssl.1.0.0'
+                'crypto.1.0.0', 'ssl.1.0.0',  # 'iconv.2'
         ):
             info('\nAdding', x)
             x = 'lib%s.dylib'%x
@@ -546,7 +526,7 @@ class Py2App(object):
                 ext = os.path.splitext(y)[1]
                 if ext not in ('', '.py', '.so') or \
                     (not ext and not os.path.isdir(join(root, y))):
-                        ans.append(y)
+                    ans.append(y)
 
             return ans
         if dest is None:
@@ -624,7 +604,7 @@ class Py2App(object):
                     except:
                         self.warn('WARNING: Failed to byte-compile', y)
 
-    def create_app_clone(self, name, specialise_plist):
+    def create_app_clone(self, name, specialise_plist, remove_doc_types=True):
         info('\nCreating ' + name)
         cc_dir = os.path.join(self.contents_dir, name, 'Contents')
         exe_dir = join(cc_dir, 'MacOS')
@@ -635,7 +615,8 @@ class Py2App(object):
             if x == 'Info.plist':
                 plist = plistlib.readPlist(join(self.contents_dir, x))
                 specialise_plist(plist)
-                plist.pop('CFBundleDocumentTypes')
+                if remove_doc_types:
+                    plist.pop('CFBundleDocumentTypes')
                 exe = plist['CFBundleExecutable']
                 # We cannot symlink the bundle executable as if we do,
                 # codesigning fails
@@ -658,12 +639,14 @@ class Py2App(object):
         self.create_app_clone('console.app', specialise_plist)
         # Comes from the terminal-notifier project:
         # https://github.com/alloy/terminal-notifier
-        shutil.copytree(join(SW, 'build/notifier.app'), join(
-            self.contents_dir, 'calibre-notifier.app'))
+        dest = join(self.contents_dir, 'calibre-notifier.app')
+        shutil.copytree(join(SW, 'build/notifier.app'), dest)
+        shutil.copy2(join(self.resources_dir, 'calibre.icns'), join(dest, 'Contents', 'Resources', 'library.icns'))
 
     @flush
     def create_gui_apps(self):
-        def specialise_plist(launcher, plist):
+        from calibre.customize.ui import all_input_formats
+        def specialise_plist(launcher, remove_types, plist):
             plist['CFBundleDisplayName'] = plist['CFBundleName'] = {
                 'ebook-viewer':'E-book Viewer', 'ebook-edit':'Edit Book', 'calibre-debug': 'calibre (debug)',
             }[launcher]
@@ -671,8 +654,14 @@ class Py2App(object):
             if launcher != 'calibre-debug':
                 plist['CFBundleIconFile'] = launcher + '.icns'
             plist['CFBundleIdentifier'] = 'com.calibre-ebook.' + launcher
+            if not remove_types:
+                input_formats = sorted(all_input_formats())
+                e = plist['CFBundleDocumentTypes'][0]
+                exts = 'epub azw3'.split() if launcher == 'ebook-edit' else input_formats
+                e['CFBundleTypeExtensions'] = exts
         for launcher in ('ebook-viewer', 'ebook-edit', 'calibre-debug'):
-            self.create_app_clone(launcher + '.app', partial(specialise_plist, launcher))
+            remove_types = launcher == 'calibre-debug'
+            self.create_app_clone(launcher + '.app', partial(specialise_plist, launcher, remove_types), remove_doc_types=remove_types)
 
     @flush
     def copy_site(self):

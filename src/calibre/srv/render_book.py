@@ -24,6 +24,7 @@ from calibre.ebooks.oeb.iterator.book import extract_book
 from calibre.ebooks.oeb.polish.container import Container as ContainerBase
 from calibre.ebooks.oeb.polish.cover import set_epub_cover, find_cover_image
 from calibre.ebooks.oeb.polish.css import transform_css
+from calibre.ebooks.oeb.polish.utils import extract
 from calibre.ebooks.css_transform_rules import StyleDeclaration
 from calibre.ebooks.oeb.polish.toc import get_toc
 from calibre.ebooks.oeb.polish.utils import guess_type
@@ -34,17 +35,21 @@ RENDER_VERSION = 1
 
 BLANK_JPEG = b'\xff\xd8\xff\xdb\x00C\x00\x03\x02\x02\x02\x02\x02\x03\x02\x02\x02\x03\x03\x03\x03\x04\x06\x04\x04\x04\x04\x04\x08\x06\x06\x05\x06\t\x08\n\n\t\x08\t\t\n\x0c\x0f\x0c\n\x0b\x0e\x0b\t\t\r\x11\r\x0e\x0f\x10\x10\x11\x10\n\x0c\x12\x13\x12\x10\x13\x0f\x10\x10\x10\xff\xc9\x00\x0b\x08\x00\x01\x00\x01\x01\x01\x11\x00\xff\xcc\x00\x06\x00\x10\x10\x05\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xd2\xcf \xff\xd9'  # noqa
 
+
 def encode_component(x):
     return standard_b64encode(x.encode('utf-8')).decode('ascii')
 
+
 def decode_component(x):
     return standard_b64decode(x).decode('utf-8')
+
 
 def encode_url(name, frag=''):
     name = encode_component(name)
     if frag:
         name += '#' + frag
     return name
+
 
 def decode_url(x):
     parts = x.split('#', 1)
@@ -53,6 +58,7 @@ def decode_url(x):
 absolute_units = frozenset('px mm cm pt in pc q'.split())
 length_factors = {'mm':2.8346456693, 'cm':28.346456693, 'in': 72, 'pc': 12, 'q':0.708661417325}
 
+
 def convert_fontsize(length, unit, base_font_size=16.0, dpi=96.0):
     ' Convert font size to rem so that font size scaling works. Assumes the document has the specified base font size in px '
     if unit == 'px':
@@ -60,6 +66,7 @@ def convert_fontsize(length, unit, base_font_size=16.0, dpi=96.0):
     pt_to_px = dpi / 72.0
     pt_to_rem = pt_to_px / base_font_size
     return length * length_factors.get(unit, 1) * pt_to_rem
+
 
 def transform_declaration(decl):
     decl = StyleDeclaration(decl)
@@ -81,12 +88,14 @@ def transform_declaration(decl):
                 decl.change_property(prop, parent_prop, str(l) + 'rem')
     return changed
 
+
 def transform_sheet(sheet):
     changed = False
     for rule in sheet.cssRules.rulesOfType(CSSRule.STYLE_RULE):
         if transform_declaration(rule.style):
             changed = True
     return changed
+
 
 def check_for_maths(root):
     for x in root.iterdescendants('{*}math'):
@@ -96,9 +105,19 @@ def check_for_maths(root):
             return True
     return False
 
+
+def has_ancestor(elem, q):
+    while elem is not None:
+        elem = elem.getparent()
+        if elem is q:
+            return True
+    return False
+
+
 def get_length(root):
     strip_space = re.compile(r'\s+')
     ans = 0
+
     def count(elem):
         num = 0
         tname = elem.tag.rpartition('}')[-1].lower()
@@ -115,6 +134,7 @@ def get_length(root):
         for elem in body.iterdescendants('*'):
             ans += count(elem)
     return ans
+
 
 class Container(ContainerBase):
 
@@ -150,6 +170,7 @@ class Container(ContainerBase):
         self.transform_css()
         self.virtualized_names = set()
         self.virtualize_resources()
+
         def manifest_data(name):
             mt = (self.mime_map.get(name) or 'application/octet-stream').lower()
             ans = {
@@ -207,6 +228,26 @@ class Container(ContainerBase):
 
     def transform_css(self):
         transform_css(self, transform_sheet=transform_sheet, transform_style=transform_declaration)
+        # Firefox flakes out sometimes when dynamically creating <style> tags,
+        # so convert them to external stylesheets to ensure they never fail
+        style_xpath = XPath('//h:style')
+        for name, mt in tuple(self.mime_map.iteritems()):
+            mt = mt.lower()
+            if mt in OEB_DOCS:
+                head = ensure_head(self.parsed(name))
+                for style in style_xpath(self.parsed(name)):
+                    if style.text and (style.get('type') or 'text/css').lower() == 'text/css':
+                        in_head = has_ancestor(style, head)
+                        if not in_head:
+                            extract(style)
+                            head.append(style)
+                        css = style.text
+                        style.clear()
+                        style.tag = XHTML('link')
+                        style.set('type', 'text/css')
+                        style.set('rel', 'stylesheet')
+                        sname = self.add_file(name + '.css', css.encode('utf-8'), modify_name_if_needed=True)
+                        style.set('href', self.name_to_href(sname, name))
 
     def virtualize_resources(self):
 
@@ -215,6 +256,7 @@ class Container(ContainerBase):
         resource_template = link_uid + '|{}|'
         xlink_xpath = XPath('//*[@xl:href]')
         link_xpath = XPath('//h:a[@href]')
+        res_link_xpath = XPath('//h:link[@href]')
 
         def link_replacer(base, url):
             if url.startswith('#'):
@@ -249,6 +291,14 @@ class Container(ContainerBase):
             elif mt in OEB_DOCS:
                 self.virtualized_names.add(name)
                 root = self.parsed(name)
+                for link in res_link_xpath(root):
+                    ltype = (link.get('type') or 'text/css').lower()
+                    rel = (link.get('rel') or 'stylesheet').lower()
+                    if ltype != 'text/css' or rel != 'stylesheet':
+                        # This link will not be loaded by the browser anyway
+                        # and will causes the resource load check to hang
+                        link.attrib.clear()
+                        changed.add(name)
                 rewrite_links(root, partial(link_replacer, name))
                 for a in link_xpath(root):
                     href = a.get('href')
@@ -276,6 +326,7 @@ class Container(ContainerBase):
         root = self.parsed(name)
         return json.dumps(html_as_dict(root), ensure_ascii=False, separators=(',', ':')).encode('utf-8')
 
+
 def split_name(name):
     l, r = name.partition('}')[::2]
     if r:
@@ -292,6 +343,7 @@ for k in 'figure term definition directory list list-item table row cell'.split(
     EPUB_TYPE_MAP[k] = k
 
 EPUB_TYPE_MAP['help'] = 'doc-tip'
+
 
 def map_epub_type(epub_type, attribs, elem):
     val = EPUB_TYPE_MAP.get(epub_type.lower())
@@ -313,6 +365,7 @@ def map_epub_type(epub_type, attribs, elem):
             attribs.append(['role', role])
         else:
             attribs[i] = ['role', role]
+
 
 def serialize_elem(elem, nsmap):
     ns, name = split_name(elem.tag)
@@ -353,17 +406,22 @@ def serialize_elem(elem, nsmap):
         ans['a'] = attribs
     return ans
 
+
 def ensure_head(root):
     # Make sure we have only a single <head>
     heads = list(root.iterchildren(XHTML('head')))
     if len(heads) != 1:
         if not heads:
             root.insert(0, root.makeelement(XHTML('head')))
-            return
+            return root[0]
         head = heads[0]
         for eh in heads[1:]:
             for child in eh.iterchildren('*'):
                 head.append(child)
+            extract(eh)
+        return head
+    return heads[0]
+
 
 def ensure_body(root):
     # Make sure we have only a single <body>
@@ -381,8 +439,9 @@ def ensure_body(root):
                 div.append(child)
             body.append(div)
 
+
 def html_as_dict(root):
-    ensure_head(root), ensure_body(root)
+    ensure_body(root)
     for child in tuple(root.iterchildren('*')):
         if child.tag.partition('}')[-1] not in ('head', 'body'):
             root.remove(child)
@@ -403,6 +462,7 @@ def html_as_dict(root):
                 stack.append((child, child_tree_node))
     ns_map = [ns for ns, nsnum in sorted(nsmap.iteritems(), key=lambda x: x[1])]
     return {'ns_map':ns_map, 'tag_map':tags, 'tree':tree}
+
 
 def render(pathtoebook, output_dir, book_hash=None):
     Container(pathtoebook, output_dir, book_hash=book_hash)

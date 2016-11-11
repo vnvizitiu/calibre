@@ -10,12 +10,12 @@ import os
 
 from lxml.html.builder import IMG, HR
 
-from calibre import fit_image
 from calibre.constants import iswindows
 from calibre.ebooks.docx.names import barename
 from calibre.utils.filenames import ascii_filename
+from calibre.utils.img import resize_to_fit, image_to_data
 from calibre.utils.imghdr import what
-from calibre.utils.magick import Image
+
 
 class LinkedImageNotFound(ValueError):
 
@@ -23,11 +23,18 @@ class LinkedImageNotFound(ValueError):
         ValueError.__init__(self, fname)
         self.fname = fname
 
+
+def image_filename(x):
+    return ascii_filename(x).replace(' ', '_').replace('#', '_')
+
+
 def emu_to_pt(x):
     return x / 12700
 
+
 def pt_to_emu(x):
     return int(x * 12700)
+
 
 def get_image_properties(parent, XPath, get):
     width = height = None
@@ -68,6 +75,7 @@ def get_image_margins(elem):
                 continue
             ans['padding-%s' % css] = '%.3gpt' % val
     return ans
+
 
 def get_hpos(anchor, page_width, XPath, get):
     for ph in XPath('./wp:positionH')(anchor):
@@ -127,7 +135,7 @@ class Images(object):
                 raw = rawsrc.read()
         else:
             raw = self.docx.read(fname)
-        base = base or ascii_filename(fname.rpartition('/')[-1]).replace(' ', '_') or 'image'
+        base = base or image_filename(fname.rpartition('/')[-1]) or 'image'
         ext = what(None, raw) or base.rpartition('.')[-1] or 'jpeg'
         if ext == 'emf':
             # For an example, see: https://bugs.launchpad.net/bugs/1224849
@@ -156,14 +164,11 @@ class Images(object):
         return name
 
     def resize_image(self, raw, base, max_width, max_height):
-        img = Image()
-        img.load(raw)
-        resized, nwidth, nheight = fit_image(img.size[0], img.size[1], max_width, max_height)
+        resized, img = resize_to_fit(raw, max_width, max_height)
         if resized:
-            img.size = (nwidth, nheight)
             base, ext = os.path.splitext(base)
             base = base + '-%dx%d%s' % (max_width, max_height, ext)
-            raw = img.export(ext[1:])
+            raw = image_to_data(img, fmt=ext[1:])
         return raw, base, resized
 
     def generate_filename(self, rid, base=None, rid_map=None, max_width=None, max_height=None):
@@ -205,7 +210,7 @@ class Images(object):
         for pr in XPath('descendant::pic:cNvPr')(pic):
             name = pr.get('name', None)
             if name:
-                name = ascii_filename(name).replace(' ', '_')
+                name = image_filename(name)
             alt = pr.get('descr', None)
             for a in XPath('descendant::a:blip[@r:embed or @r:link]')(pic):
                 rid = get(a, 'r:embed')
