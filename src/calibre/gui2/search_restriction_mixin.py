@@ -9,13 +9,12 @@ __copyright__ = '2013, Kovid Goyal <kovid at kovidgoyal.net>'
 from functools import partial
 
 from PyQt5.Qt import (
-    Qt, QMenu, QPoint, QIcon, QDialog, QGridLayout, QLabel, QLineEdit, QComboBox,
+    Qt, QMenu, QIcon, QDialog, QGridLayout, QLabel, QLineEdit, QComboBox,
     QDialogButtonBox, QSize, QVBoxLayout, QListWidget, QRadioButton, QAction, QTextBrowser)
 
 from calibre.gui2 import error_dialog, question_dialog, gprefs
 from calibre.gui2.dialogs.confirm_delete import confirm
 from calibre.gui2.widgets import ComboBoxWithHelp
-from calibre.utils.config_base import tweaks
 from calibre.utils.icu import sort_key
 from calibre.utils.search_query_parser import ParseException
 from calibre.utils.localization import localize_user_manual_link
@@ -28,7 +27,7 @@ class SelectNames(QDialog):  # {{{
         self.l = l = QVBoxLayout(self)
         self.setLayout(l)
 
-        self.la = la = QLabel(_('Create a Virtual Library based on %s') % txt)
+        self.la = la = QLabel(_('Create a Virtual library based on %s') % txt)
         l.addWidget(la)
 
         self._names = QListWidget(self)
@@ -59,6 +58,7 @@ class SelectNames(QDialog):  # {{{
         return ' and ' if self._and.isChecked() else ' or '
 
 # }}}
+
 
 MAX_VIRTUAL_LIBRARY_NAME_LENGTH = 40
 
@@ -133,7 +133,7 @@ class CreateVirtualLibrary(QDialog):  # {{{
             '<a href="publisher.{2}">{2}</a>, '
             '<a href="series.{3}">{3}</a>, '
             '<a href="search.{4}">{4}</a>.').format(_('Authors'), _('Tags'),
-                                            _('Publishers'), _('Series'), _('Saved Searches')))
+                                            _('Publishers'), _('Series'), _('Saved searches')))
         sl.setWordWrap(True)
         sl.setTextInteractionFlags(Qt.LinksAccessibleByMouse)
         sl.linkActivated.connect(self.link_activated)
@@ -141,17 +141,17 @@ class CreateVirtualLibrary(QDialog):  # {{{
         gl.setRowStretch(3,10)
 
         self.hl = hl = QLabel(_('''
-            <h2>Virtual Libraries</h2>
+            <h2>Virtual libraries</h2>
 
             <p>Using <i>virtual libraries</i> you can restrict calibre to only show
             you books that match a search. When a virtual library is in effect, calibre
-            behaves as though the library contains only the matched books. The Tag Browser
+            behaves as though the library contains only the matched books. The Tag browser
             display only the tags/authors/series/etc. that belong to the matched books and any searches
             you do will only search within the books in the virtual library. This
             is a good way to partition your large library into smaller and easier to work with subsets.</p>
 
-            <p>For example you can use a Virtual Library to only show you books with the Tag <i>"Unread"</i>
-            or only books by <i>"My Favorite Author"</i> or only books in a particular series.</p>
+            <p>For example you can use a Virtual library to only show you books with the Tag <i>"Unread"</i>
+            or only books by <i>"My favorite author"</i> or only books in a particular series.</p>
 
             <p>More information and examples are available in the
             <a href="%s">User Manual</a>.</p>
@@ -331,8 +331,9 @@ class SearchRestrictionMixin(object):
         self.search_based_vl = None
 
         self.virtual_library_menu = QMenu()
+        self.virtual_library.setMenu(self.virtual_library_menu)
+        self.virtual_library_menu.aboutToShow.connect(self.virtual_library_menu_about_to_show)
 
-        self.virtual_library.clicked.connect(self.virtual_library_clicked)
         self.clear_vl.clicked.connect(lambda x: (self.apply_virtual_library(), self.clear_additional_restriction()))
 
         self.virtual_library_tooltip = \
@@ -341,10 +342,10 @@ class SearchRestrictionMixin(object):
 
         self.search_restriction = ComboBoxWithHelp(self)
         self.search_restriction.setVisible(False)
-        self.search_count.setText(_("(all books)"))
+        self.clear_vl.setText(_("(all books)"))
         self.ar_menu = QMenu(_('Additional restriction'))
-        self.edit_menu = QMenu(_('Edit Virtual Library'))
-        self.rm_menu = QMenu(_('Remove Virtual Library'))
+        self.edit_menu = QMenu(_('Edit Virtual library'))
+        self.rm_menu = QMenu(_('Remove Virtual library'))
         self.search_restriction_list_built = False
 
     def add_virtual_library(self, db, name, search):
@@ -364,11 +365,11 @@ class SearchRestrictionMixin(object):
                 self.apply_virtual_library(cd.library_name)
             self.rebuild_vl_tabs()
 
-    def virtual_library_clicked(self):
+    def virtual_library_menu_about_to_show(self):
         m = self.virtual_library_menu
         m.clear()
 
-        a = m.addAction(_('Create Virtual Library'))
+        a = m.addAction(_('Create Virtual library'))
         a.triggered.connect(partial(self.do_create_edit, name=None))
 
         a = self.edit_menu
@@ -419,9 +420,6 @@ class SearchRestrictionMixin(object):
         for vl in sorted(virt_libs.keys(), key=sort_key):
             a = m.addAction(self.checked if vl == current_lib else self.empty, vl.replace('&', '&&'))
             a.triggered.connect(partial(self.apply_virtual_library, library=vl))
-
-        p = QPoint(0, self.virtual_library.height())
-        self.virtual_library_menu.popup(self.virtual_library.mapToGlobal(p))
 
     def rebuild_vl_tabs(self):
         self.vl_tabs.rebuild()
@@ -623,18 +621,13 @@ class SearchRestrictionMixin(object):
             t = ' :: '.join(restrictions)
             if len(t) > 20:
                 t = t[:19] + u'…'
-            self.search_count.setStyleSheet(
-                    'QLabel { border-radius: 6px; background-color: %s }' %
-                    tweaks['highlight_virtual_library'])
             self.clear_vl.setVisible(True)
-            self.search_count.setVisible(not gprefs['show_vl_tabs'])
+            self.clear_vl.setVisible(not gprefs['show_vl_tabs'])
         else:  # No restriction or not library view
             t = ''
-            self.search_count.setStyleSheet(
-                    'QLabel { background-color: transparent; }')
             self.clear_vl.setVisible(False)
-            self.search_count.setVisible(False)
-        self.search_count.setText(t)
+        self.clear_vl.setText(t.replace('&', '&&'))
+
 
 if __name__ == '__main__':
     from calibre.gui2 import Application
@@ -644,5 +637,3 @@ if __name__ == '__main__':
     gui = init_gui()
     d = CreateVirtualLibrary(gui, [])
     d.exec_()
-
-

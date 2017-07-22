@@ -162,14 +162,14 @@ class DigestAuth(object):  # {{{
                 log.warn('Authorization URI mismatch: %s != %s from client: %s' % (
                     data.path, path, data.remote_addr))
             raise HTTPSimpleResponse(httplib.BAD_REQUEST, 'The uri in the Request Line and the Authorization header do not match')
-        return self.response is not None and path == data.path and self.request_digest(pw, data) == self.response
+        return self.response is not None and data.path == path and self.request_digest(pw, data) == self.response
 # }}}
 
 
 class AuthController(object):
 
     '''
-    Implement Basic/Digest authentication for the content server. Android browsers
+    Implement Basic/Digest authentication for the Content server. Android browsers
     cannot handle HTTP AUTH when downloading files, as the download is handed
     off to a separate process. So we use a cookie based authentication scheme
     for some endpoints (/get) to allow downloads to work on android. Apparently,

@@ -4,6 +4,7 @@ __copyright__ = '2008, Kovid Goyal <kovid at kovidgoyal.net>'
 
 import os, shutil, traceback, functools, sys
 from collections import defaultdict
+from itertools import chain
 
 from calibre.customize import (CatalogPlugin, FileTypePlugin, PluginNotFound,
                               MetadataReaderPlugin, MetadataWriterPlugin,
@@ -20,9 +21,10 @@ from calibre.ebooks.metadata import MetaInformation
 from calibre.utils.config import (make_config_dir, Config, ConfigProxy,
                                  plugin_dir, OptionParser)
 from calibre.ebooks.metadata.sources.base import Source
-from calibre.constants import DEBUG
+from calibre.constants import DEBUG, numeric_version
 
-builtin_names = frozenset([p.name for p in builtin_plugins])
+builtin_names = frozenset(p.name for p in builtin_plugins)
+BLACKLISTED_PLUGINS = frozenset({'Marvin XD', 'iOS reader applications'})
 
 
 class NameConflict(ValueError):
@@ -39,6 +41,7 @@ def _config():
 
     return ConfigProxy(c)
 
+
 config = _config()
 
 
@@ -50,7 +53,7 @@ def find_plugin(name):
 
 def load_plugin(path_to_zip_file):  # {{{
     '''
-    Load plugin from zip file or raise InvalidPlugin error
+    Load plugin from ZIP file or raise InvalidPlugin error
 
     :return: A :class:`Plugin` instance.
     '''
@@ -97,6 +100,7 @@ def restore_plugin_state_to_default(plugin_or_name):
         ep.remove(x)
     config['enabled_plugins'] = ep
 
+
 default_disabled_plugins = set([
     'Overdrive', 'Douban Books', 'OZON.ru', 'Edelweiss', 'Google Images', 'Big Book Search',
 ])
@@ -111,6 +115,7 @@ def is_disabled(plugin):
 
 # File type plugins {{{
 
+
 _on_import           = {}
 _on_postimport       = {}
 _on_preprocess       = {}
@@ -119,11 +124,7 @@ _on_postadd          = []
 
 
 def reread_filetype_plugins():
-    global _on_import
-    global _on_postimport
-    global _on_preprocess
-    global _on_postprocess
-    global _on_postadd
+    global _on_import, _on_postimport, _on_preprocess, _on_postprocess, _on_postadd
     _on_import           = defaultdict(list)
     _on_postimport       = defaultdict(list)
     _on_preprocess       = defaultdict(list)
@@ -144,47 +145,50 @@ def reread_filetype_plugins():
                     _on_postprocess[ft].append(plugin)
 
 
+def plugins_for_ft(ft, occasion):
+    op = {
+        'import':_on_import, 'preprocess':_on_preprocess, 'postprocess':_on_postprocess, 'postimport':_on_postimport,
+    }[occasion]
+    for p in chain(op.get(ft, ()), op.get('*', ())):
+        if not is_disabled(p):
+            yield p
+
+
 def _run_filetype_plugins(path_to_file, ft=None, occasion='preprocess'):
-    occasion_plugins = {'import':_on_import, 'preprocess':_on_preprocess,
-                'postprocess':_on_postprocess}[occasion]
     customization = config['plugin_customization']
     if ft is None:
         ft = os.path.splitext(path_to_file)[-1].lower().replace('.', '')
     nfp = path_to_file
-    for plugin in occasion_plugins.get(ft, []):
-        if is_disabled(plugin):
-            continue
+    for plugin in plugins_for_ft(ft, occasion):
         plugin.site_customization = customization.get(plugin.name, '')
         oo, oe = sys.stdout, sys.stderr  # Some file type plugins out there override the output streams with buggy implementations
         with plugin:
             try:
-                nfp = plugin.run(path_to_file)
-                if not nfp:
-                    nfp = path_to_file
+                plugin.original_path_to_file = path_to_file
+            except Exception:
+                pass
+            try:
+                nfp = plugin.run(nfp) or nfp
             except:
                 print >>oe, 'Running file type plugin %s failed with traceback:'%plugin.name
                 traceback.print_exc(file=oe)
         sys.stdout, sys.stderr = oo, oe
-    x = lambda j : os.path.normpath(os.path.normcase(j))
+    x = lambda j: os.path.normpath(os.path.normcase(j))
     if occasion == 'postprocess' and x(nfp) != x(path_to_file):
         shutil.copyfile(nfp, path_to_file)
         nfp = path_to_file
     return nfp
 
-run_plugins_on_import      = functools.partial(_run_filetype_plugins,
-                                               occasion='import')
-run_plugins_on_preprocess  = functools.partial(_run_filetype_plugins,
-                                               occasion='preprocess')
-run_plugins_on_postprocess = functools.partial(_run_filetype_plugins,
-                                               occasion='postprocess')
+
+run_plugins_on_import      = functools.partial(_run_filetype_plugins, occasion='import')
+run_plugins_on_preprocess  = functools.partial(_run_filetype_plugins, occasion='preprocess')
+run_plugins_on_postprocess = functools.partial(_run_filetype_plugins, occasion='postprocess')
 
 
 def run_plugins_on_postimport(db, book_id, fmt):
     customization = config['plugin_customization']
     fmt = fmt.lower()
-    for plugin in _on_postimport.get(fmt, []):
-        if is_disabled(plugin):
-            continue
+    for plugin in plugins_for_ft(fmt, 'postimport'):
         plugin.site_customization = customization.get(plugin.name, '')
         with plugin:
             try:
@@ -317,6 +321,8 @@ def available_stores():
 # }}}
 
 # Metadata read/write {{{
+
+
 _metadata_readers = {}
 _metadata_writers = {}
 
@@ -362,6 +368,7 @@ class QuickMetadata(object):
     def __exit__(self, *args):
         self.quick = False
 
+
 quick_metadata = QuickMetadata()
 
 
@@ -376,6 +383,7 @@ class ApplyNullMetadata(object):
     def __exit__(self, *args):
         self.apply_null = False
 
+
 apply_null_metadata = ApplyNullMetadata()
 
 
@@ -389,6 +397,7 @@ class ForceIdentifiers(object):
 
     def __exit__(self, *args):
         self.force_identifiers = False
+
 
 force_identifiers = ForceIdentifiers()
 
@@ -607,6 +616,21 @@ def all_metadata_plugins():
     for plugin in _initialized_plugins:
         if isinstance(plugin, Source):
             yield plugin
+
+
+def patch_metadata_plugins(possibly_updated_plugins):
+    patches = {}
+    for i, plugin in enumerate(_initialized_plugins):
+        if isinstance(plugin, Source) and plugin.name in builtin_names:
+            pup = possibly_updated_plugins.get(plugin.name)
+            if pup is not None:
+                if pup.version > plugin.version and pup.minimum_calibre_version <= numeric_version:
+                    patches[i] = pup(None)
+                    # Metadata source plugins dont use initialize() but that
+                    # might change in the future, so be safe.
+                    patches[i].initialize()
+    for i, pup in patches.iteritems():
+        _initialized_plugins[i] = pup
 # }}}
 
 # Viewer plugins {{{
@@ -629,6 +653,7 @@ def all_edit_book_tool_plugins():
 
 # Initialize plugins {{{
 
+
 _initialized_plugins = []
 
 
@@ -645,7 +670,7 @@ def initialize_plugin(plugin, path_to_zip_file):
 
 
 def has_external_plugins():
-    'True if there are updateable (zip file based) plugins'
+    'True if there are updateable (ZIP file based) plugins'
     return bool(config['plugins'])
 
 
@@ -656,7 +681,9 @@ def initialize_plugins(perf=False):
             builtin_names]
     for p in conflicts:
         remove_plugin(p)
-    external_plugins = config['plugins']
+    external_plugins = config['plugins'].copy()
+    for name in BLACKLISTED_PLUGINS:
+        external_plugins.pop(name, None)
     ostdout, ostderr = sys.stdout, sys.stderr
     if perf:
         from collections import defaultdict
@@ -693,6 +720,7 @@ def initialize_plugins(perf=False):
     _initialized_plugins.sort(cmp=lambda x,y:cmp(x.priority, y.priority), reverse=True)
     reread_filetype_plugins()
     reread_metadata_plugins()
+
 
 initialize_plugins()
 
@@ -731,7 +759,7 @@ def option_parser():
     Customize calibre by loading external plugins.
     '''))
     parser.add_option('-a', '--add-plugin', default=None,
-                      help=_('Add a plugin by specifying the path to the zip file containing it.'))
+                      help=_('Add a plugin by specifying the path to the ZIP file containing it.'))
     parser.add_option('-b', '--build-plugin', default=None,
             help=_('For plugin developers: Path to the directory where you are'
                 ' developing the plugin. This command will automatically zip '
@@ -798,6 +826,7 @@ def main(args=sys.argv):
             print
 
     return 0
+
 
 if __name__ == '__main__':
     sys.exit(main())

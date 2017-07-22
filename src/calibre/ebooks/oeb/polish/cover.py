@@ -115,6 +115,7 @@ def is_raster_image(media_type):
     return media_type and media_type.lower() in {
         'image/png', 'image/jpeg', 'image/jpg', 'image/gif'}
 
+
 COVER_TYPES = {
     'coverimagestandard', 'other.ms-coverimage-standard',
     'other.ms-titleimage-standard', 'other.ms-titleimage',
@@ -345,11 +346,14 @@ def create_epub_cover(container, cover_path, existing_image, options=None):
     if no_svg:
         style = 'style="height: 100%%"'
         templ = CoverManager.NONSVG_TEMPLATE.replace('__style__', style)
+        has_svg = False
     else:
         if callable(cover_path):
             templ = (options or {}).get('template', CoverManager.SVG_TEMPLATE)
+            has_svg = 'xlink:href' in templ
         else:
             width, height = 600, 800
+            has_svg = True
             try:
                 if existing_image:
                     width, height = identify(container.raw_data(existing_image, decode=False))[1:]
@@ -400,6 +404,8 @@ def create_epub_cover(container, cover_path, existing_image, options=None):
     else:
         container.apply_unique_properties(raster_cover, 'cover-image')
         container.apply_unique_properties(titlepage, 'calibre:title-page')
+        if has_svg:
+            container.add_properties(titlepage, 'svg')
 
     return raster_cover, titlepage
 
@@ -429,7 +435,7 @@ def set_epub_cover(container, cover_path, report, options=None):
     # pages and handle possibly removing stylesheets referred to by them.
 
     spine_items = tuple(container.spine_items)
-    if cover_page is None:
+    if cover_page is None and spine_items:
         # Check if the first item in the spine is a simple cover wrapper
         candidate = container.abspath_to_name(spine_items[0])
         if find_cover_image_in_page(container, candidate) is not None:

@@ -48,15 +48,15 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
     "to search in the value box, then push the Save button. "
     "<p>Note: Search terms are forced to lower case; <code>MySearch</code> "
     "and <code>mysearch</code> are the same term."
-    "<p>You can have your grouped search term show up as user categories in "
-    " the Tag Browser. Just add the grouped search term names to the Make user "
+    "<p>You can have your grouped search term show up as User categories in "
+    " the Tag browser. Just add the grouped search term names to the Make User "
     "categories from box. You can add multiple terms separated by commas. "
-    "The new user category will be automatically "
+    "The new User category will be automatically "
     "populated with all the items in the categories included in the grouped "
-    "search term. <p>Automatic user categories permit you to see easily "
+    "search term. <p>Automatic User categories permit you to see easily "
     "all the category items that "
     "are in the columns contained in the grouped search term. Using the above "
-    "<code>allseries</code> example, the automatically-generated user category "
+    "<code>allseries</code> example, the automatically-generated User category "
     "will contain all the series mentioned in <code>series</code>, "
     "<code>#myseries</code>, and <code>#myseries2</code>. This "
     "can be useful to check for duplicates, to find which column contains "
@@ -139,7 +139,7 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
         idx = self.gst_names.currentIndex()
         name = icu_lower(unicode(self.gst_names.currentText()))
         if not name:
-            return error_dialog(self.gui, _('Grouped Search Terms'),
+            return error_dialog(self.gui, _('Grouped search terms'),
                                 _('The search term cannot be blank'),
                                 show=True)
         if idx != 0:
@@ -149,17 +149,17 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
         if name != orig_name:
             if name in self.db.field_metadata.get_search_terms() and \
                     name not in self.orig_gst_keys:
-                return error_dialog(self.gui, _('Grouped Search Terms'),
+                return error_dialog(self.gui, _('Grouped search terms'),
                     _('That name is already used for a column or grouped search term'),
                     show=True)
             if name in [icu_lower(p) for p in self.db.prefs.get('user_categories', {})]:
-                return error_dialog(self.gui, _('Grouped Search Terms'),
-                    _('That name is already used for user category'),
+                return error_dialog(self.gui, _('Grouped search terms'),
+                    _('That name is already used for User category'),
                     show=True)
 
         val = [v.strip() for v in unicode(self.gst_value.text()).split(',') if v.strip()]
         if not val:
-            return error_dialog(self.gui, _('Grouped Search Terms'),
+            return error_dialog(self.gui, _('Grouped search terms'),
                 _('The value box cannot be empty'), show=True)
 
         if orig_name and name != orig_name:
@@ -172,7 +172,7 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
 
     def gst_delete_clicked(self):
         if self.gst_names.currentIndex() == 0:
-            return error_dialog(self.gui, _('Grouped Search Terms'),
+            return error_dialog(self.gui, _('Grouped search terms'),
                 _('The empty grouped search term cannot be deleted'), show=True)
         name = unicode(self.gst_names.currentText())
         if name in self.gst:
@@ -246,7 +246,7 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
                 config[key] = []
         self.gui.search.clear_history()
 
+
 if __name__ == '__main__':
     app = QApplication([])
     test_widget('Interface', 'Search')
-

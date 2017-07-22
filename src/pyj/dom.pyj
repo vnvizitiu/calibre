@@ -13,6 +13,7 @@ simple_vendor_prefixes = {
     'animation-fill-mode': v"['webkit', 'moz', 'o']",
     'animation-play-state': v"['webkit', 'moz', 'o']",
     'transform': v"['webkit', 'ms', 'moz', 'o']",
+    'transform-origin': v"['webkit', 'ms', 'moz', 'o']",
     'transition': v"['webkit', 'moz', 'o']",
     'filter': v"['webkit']",
     'user-select': v"['webkit', 'moz', 'ms']",
@@ -22,6 +23,7 @@ simple_vendor_prefixes = {
     'column-gap': v"['webkit', 'moz']",
     'column-width': v"['webkit', 'moz']",
     'column-rule': v"['webkit', 'moz']",
+    'column-fill': v"['moz']",
 }
 
 def set_css(elem, **kw):

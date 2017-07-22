@@ -103,6 +103,7 @@ def osx_version():
 def confirm_config_name(name):
     return name + '_again'
 
+
 _filename_sanitize = re.compile(r'[\xae\0\\|\?\*<":>\+/]')
 _filename_sanitize_unicode = frozenset([u'\\', u'|', u'?', u'*', u'<',
     u'"', u':', u'>', u'+', u'/'] + list(map(unichr, xrange(32))))
@@ -389,39 +390,22 @@ def get_proxy_info(proxy_scheme, proxy_string):
         return None
     return ans
 
+
 # IE 11 on windows 7
 USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko'
 USER_AGENT_MOBILE = 'Mozilla/5.0 (Windows; U; Windows CE 5.1; rv:1.8.1a3) Gecko/20060610 Minimo/0.016'
 
 
-def random_user_agent(choose=None):
-    try:
-        ua_list = random_user_agent.ua_list
-    except AttributeError:
-        try:
-            ua_list = random_user_agent.ua_list = P('common-user-agents.txt', data=True, allow_user_override=False).decode('utf-8').splitlines()
-        except IOError:
-            # People running from source checkout
-            ua_list = random_user_agent.ua_list = [
-                 # IE 11 - windows 10
-                 'Mozilla/5.0 (Windows NT 10.0; Trident/7.0; rv:11.0) like Gecko',
-                 # IE 11 - windows 8.1
-                 'Mozilla/5.0 (Windows NT 6.3; Trident/7.0; rv:11.0) like Gecko',
-                 # IE 11 - windows 8
-                 'Mozilla/5.0 (Windows NT 6.2; Trident/7.0; rv:11.0) like Gecko',
-                 # IE 11 - windows 7
-                 'Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko',
-                 # 32bit IE 11 on 64 bit win 10
-                 'Mozilla/5.0 (Windows NT 10.0; WOW64; Trident/7.0; rv:11.0) like Gecko',
-                 # 32bit IE 11 on 64 bit win 8.1
-                 'Mozilla/5.0 (Windows NT 6.3; WOW64; Trident/7.0; rv:11.0) like Gecko',
-                 # 32bit IE 11 on 64 bit win 7
-                 'Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0) like Gecko',
-            ]
+def random_user_agent(choose=None, allow_ie=True):
+    from calibre.utils.random_ua import common_user_agents
+    ua_list = common_user_agents()
+    ua_list = filter(lambda x: 'Mobile/' not in x, ua_list)
+    if not allow_ie:
+        ua_list = filter(lambda x: 'Trident/' not in x and 'Edge/' not in x, ua_list)
     return random.choice(ua_list) if choose is None else ua_list[choose]
 
 
-def browser(honor_time=True, max_time=2, mobile_browser=False, user_agent=None, use_robust_parser=False, verify_ssl_certificates=True):
+def browser(honor_time=True, max_time=2, mobile_browser=False, user_agent=None, verify_ssl_certificates=True, handle_refresh=True):
     '''
     Create a mechanize browser for web scraping. The browser handles cookies,
     refresh requests and ignores robots.txt. Also uses proxy if available.
@@ -431,12 +415,8 @@ def browser(honor_time=True, max_time=2, mobile_browser=False, user_agent=None, 
     :param verify_ssl_certificates: If false SSL certificates errors are ignored
     '''
     from calibre.utils.browser import Browser
-    if use_robust_parser:
-        import mechanize
-        opener = Browser(factory=mechanize.RobustFactory(), verify_ssl=verify_ssl_certificates)
-    else:
-        opener = Browser(verify_ssl=verify_ssl_certificates)
-    opener.set_handle_refresh(True, max_time=max_time, honor_time=honor_time)
+    opener = Browser(verify_ssl=verify_ssl_certificates)
+    opener.set_handle_refresh(handle_refresh, max_time=max_time, honor_time=honor_time)
     opener.set_handle_robots(False)
     if user_agent is None:
         user_agent = USER_AGENT_MOBILE if mobile_browser else USER_AGENT
@@ -631,6 +611,7 @@ def entity_to_unicode(match, exceptions=[], encoding='cp1252',
     except KeyError:
         return '&'+ent+';'
 
+
 _ent_pat = re.compile(r'&(\S+?);')
 xml_entity_to_unicode = partial(entity_to_unicode, result_exceptions={
     '"' : '&quot;',
@@ -657,21 +638,21 @@ def prepare_string_for_xml(raw, attribute=False):
 
 
 def isbytestring(obj):
-    return isinstance(obj, (str, bytes))
+    return isinstance(obj, bytes)
 
 
 def force_unicode(obj, enc=preferred_encoding):
     if isbytestring(obj):
         try:
             obj = obj.decode(enc)
-        except:
+        except Exception:
             try:
                 obj = obj.decode(filesystem_encoding if enc ==
                         preferred_encoding else preferred_encoding)
-            except:
+            except Exception:
                 try:
                     obj = obj.decode('utf-8')
-                except:
+                except Exception:
                     obj = repr(obj)
                     if isbytestring(obj):
                         obj = obj.decode('utf-8')
@@ -739,4 +720,3 @@ def ipython(user_ns=None):
 def fsync(fileobj):
     fileobj.flush()
     os.fsync(fileobj.fileno())
-

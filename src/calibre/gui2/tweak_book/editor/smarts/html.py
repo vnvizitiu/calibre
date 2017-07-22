@@ -8,6 +8,7 @@ __copyright__ = '2014, Kovid Goyal <kovid at kovidgoyal.net>'
 
 import sys, re
 from operator import itemgetter
+from itertools import chain
 
 from cssutils import parseStyle
 from PyQt5.Qt import QTextEdit, Qt, QTextCursor
@@ -250,6 +251,7 @@ def ensure_not_within_tag_definition(cursor, forward=True):
 
     return False
 
+
 BLOCK_TAG_NAMES = frozenset((
     'address', 'article', 'aside', 'blockquote', 'center', 'dir', 'fieldset',
     'isindex', 'menu', 'noframes', 'hgroup', 'noscript', 'pre', 'section',
@@ -294,6 +296,7 @@ def set_style_property(tag, property_name, value, editor):
         d.setProperty(property_name, value)
         c.insertText('"%s"' % css(d))
 
+
 entity_pat = re.compile(r'&(#{0,1}[a-zA-Z0-9]{1,8});$')
 
 
@@ -308,7 +311,7 @@ class Smarts(NullSmarts):
             Smarts.self_closing_pat = re.compile(r'/\s*>')
             Smarts.complete_attr_pat = re.compile(r'''([a-zA-Z0-9_-]+)\s*=\s*(?:'([^']*)|"([^"]*))$''')
         NullSmarts.__init__(self, *args, **kwargs)
-        self.last_matched_tag = None
+        self.last_matched_tag = self.last_matched_closing_tag = None
 
     def get_extra_selections(self, editor):
         ans = []
@@ -329,12 +332,23 @@ class Smarts(NullSmarts):
         c = editor.textCursor()
         block, offset = c.block(), c.positionInBlock()
         tag = self.last_matched_tag = find_closest_containing_tag(block, offset, max_tags=2000)
+        self.last_matched_closing_tag = None
         if tag is not None:
             add_tag(tag)
-            tag = find_closing_tag(tag, max_tags=4000)
+            tag = self.last_matched_closing_tag = find_closing_tag(tag, max_tags=4000)
             if tag is not None:
                 add_tag(tag)
         return ans
+
+    def jump_to_enclosing_tag(self, editor, start=True):
+        editor.highlighter.join()
+        tag = self.last_matched_tag if start else self.last_matched_closing_tag
+        if tag is None:
+            return False
+        c = editor.textCursor()
+        c.setPosition(tag.start_block.position() + tag.start_offset + (1 if start else 2))
+        editor.setTextCursor(c)
+        return True
 
     def rename_block_tag(self, editor, new_name):
         editor.highlighter.join()
@@ -433,7 +447,7 @@ class Smarts(NullSmarts):
 
     def cursor_position_with_sourceline(self, cursor, for_position_sync=True, use_matched_tag=True):
         ''' Return the tag just before the current cursor as a source line
-        number and a list of tags defined on that line upto and including the
+        number and a list of tags defined on that line up to and including the
         containing tag. If ``for_position_sync`` is False then the tag
         *containing* the cursor is returned instead of the tag just before the
         cursor. Note that finding the containing tag is expensive, so
@@ -618,6 +632,12 @@ class Smarts(NullSmarts):
         if key == Qt.Key_Backspace and smart_backspace(editor, ev):
             return True
 
+        if key in (Qt.Key_BraceLeft, Qt.Key_BraceRight):
+            mods = ev.modifiers()
+            if int(mods & Qt.ControlModifier):
+                if self.jump_to_enclosing_tag(editor, key == Qt.Key_BraceLeft):
+                    return True
+
         return False
 
     def replace_possible_entity(self, editor):
@@ -698,8 +718,19 @@ class Smarts(NullSmarts):
         c.setPosition(cstart)
         block = c.block()
         in_text = find_tag_definition(block, 0)[0] is None
+        if in_text:
+            # Check if we are in comment/PI/etc.
+            pb = block.previous()
+            while pb.isValid():
+                boundaries = pb.userData().non_tag_structures
+                if boundaries:
+                    if boundaries[-1].is_start:
+                        in_text = False
+                    break
+                pb = pb.previous()
 
         def append(text, start):
+            text = text.replace(PARAGRAPH_SEPARATOR, '\n')
             after = start + len(text)
             if start <= cend and cstart < after:
                 extra = after - (cend + 1)
@@ -711,13 +742,13 @@ class Smarts(NullSmarts):
                 chunks.append((text, start + max(extra, 0)))
 
         while block.isValid() and block.position() <= cend:
-            boundaries = sorted(block.userData().tags, key=get_offset)
+            ud = block.userData()
+            boundaries = sorted(chain(ud.tags, ud.non_tag_structures), key=get_offset)
             if not boundaries:
                 # Add the whole line
                 if in_text:
-                    text = block.text()
-                    if text:
-                        append(text, block.position())
+                    text = block.text() + '\n'
+                    append(text, block.position())
             else:
                 start = block.position()
                 c.setPosition(start)
@@ -733,10 +764,11 @@ class Smarts(NullSmarts):
                     c.setPosition(block.position() + boundaries[-1].offset + 1)
                     c.movePosition(c.EndOfBlock, c.KeepAnchor)
                     if c.hasSelection():
-                        append(c.selectedText(), c.anchor())
+                        append(c.selectedText() + '\n', c.anchor())
             block = block.next()
         s, e = find_text_in_chunks(pat, chunks)
         return s != -1 and e != -1, s, e
+
 
 if __name__ == '__main__':  # {{{
     from calibre.gui2.tweak_book.editor.widget import launch_editor

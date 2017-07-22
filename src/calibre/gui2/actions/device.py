@@ -7,15 +7,14 @@ __docformat__ = 'restructuredtext en'
 
 from functools import partial
 
-from PyQt5.Qt import QToolButton, QMenu, pyqtSignal, QIcon, QTimer
+from PyQt5.Qt import QIcon, QMenu, QTimer, QToolButton, pyqtSignal
 
-from calibre.gui2.actions import InterfaceAction
-from calibre.utils.smtp import config as email_config
-from calibre.utils.config import tweaks
-from calibre.constants import iswindows, isosx, get_osx_version
-from calibre.gui2.dialogs.smartdevice import SmartdeviceDialog
+from calibre.constants import get_osx_version, isosx, iswindows
 from calibre.gui2 import info_dialog, question_dialog
-from calibre.library.server import server_config as content_server_config
+from calibre.gui2.actions import InterfaceAction
+from calibre.gui2.dialogs.smartdevice import SmartdeviceDialog
+from calibre.utils.icu import primary_sort_key
+from calibre.utils.smtp import config as email_config
 
 
 class ShareConnMenu(QMenu):  # {{{
@@ -48,7 +47,7 @@ class ShareConnMenu(QMenu):  # {{{
         self.addSeparator()
         self.toggle_server_action = \
             self.addAction(QIcon(I('network-server.png')),
-            _('Start Content Server'))
+            _('Start Content server'))
         self.toggle_server_action.triggered.connect(lambda x:
                 self.toggle_server.emit())
         self.control_smartdevice_action = \
@@ -70,22 +69,22 @@ class ShareConnMenu(QMenu):  # {{{
                 ac = getattr(self, 'connect_to_%s_action'%attr)
                 r(prefix + attr, unicode(ac.text()), action=ac,
                         group=gr)
-            r(prefix+' content server', _('Start/stop content server'),
+            r(prefix+' content server', _('Start/stop Content server'),
                     action=self.toggle_server_action, group=gr)
 
     def server_state_changed(self, running):
         from calibre.utils.mdns import get_external_ip, verify_ipV4_address
-        text = _('Start Content Server')
+        text = _('Start Content server')
         if running:
-            listen_on = (verify_ipV4_address(tweaks['server_listen_on']) or
-                    get_external_ip())
-            try :
-                cs_port = content_server_config().parse().port
-                ip_text = _(' [%(ip)s, port %(port)d]')%dict(ip=listen_on,
-                        port=cs_port)
-            except:
+            from calibre.srv.opts import server_config
+            opts = server_config()
+            listen_on = verify_ipV4_address(opts.listen_on) or get_external_ip()
+            try:
+                ip_text = _(' [%(ip)s, port %(port)d]')%dict(
+                    ip=listen_on, port=opts.port)
+            except Exception:
                 ip_text = ' [%s]'%listen_on
-            text = _('Stop Content Server') + ip_text
+            text = _('Stop Content server') + ip_text
         self.toggle_server_action.setText(text)
 
     def hide_smartdevice_menus(self):
@@ -105,7 +104,11 @@ class ShareConnMenu(QMenu):  # {{{
             self.email_to_and_delete_menu = QMenu(
                     _('Email to and delete from library')+'...', self)
             keys = sorted(opts.accounts.keys())
-            for account in keys:
+
+            def sk(account):
+                return primary_sort_key(opts.aliases.get(account) or account)
+
+            for account in sorted(keys, key=sk):
                 formats, auto, default = opts.accounts[account]
                 subject = opts.subjects.get(account, '')
                 alias = opts.aliases.get(account, '')
@@ -183,6 +186,7 @@ class ConnectShareAction(InterfaceAction):
     popup_type = QToolButton.InstantPopup
 
     def genesis(self):
+        self.content_server_is_running = False
         self.share_conn_menu = ShareConnMenu(self.gui)
         self.share_conn_menu.aboutToShow.connect(self.set_smartdevice_action_state)
         self.share_conn_menu.toggle_server.connect(self.toggle_content_server)
@@ -208,17 +212,19 @@ class ConnectShareAction(InterfaceAction):
     def content_server_state_changed(self, running):
         self.share_conn_menu.server_state_changed(running)
         if running:
+            self.content_server_is_running = True
             self.qaction.setIcon(QIcon(I('connect_share_on.png')))
         else:
+            self.content_server_is_running = False
             self.qaction.setIcon(QIcon(I('connect_share.png')))
 
     def toggle_content_server(self):
         if self.gui.content_server is None:
             self.gui.start_content_server()
         else:
-            self.gui.content_server.threaded_exit()
+            self.gui.content_server.stop()
             self.stopping_msg = info_dialog(self.gui, _('Stopping'),
-                    _('Stopping server, this could take upto a minute, please wait...'),
+                    _('Stopping server, this could take up to a minute, please wait...'),
                     show_copy_button=False)
             QTimer.singleShot(1000, self.check_exited)
             self.stopping_msg.exec_()
@@ -285,5 +291,3 @@ class ConnectShareAction(InterfaceAction):
         ac = self.share_conn_menu.control_smartdevice_action
         ac.setIcon(QIcon(I('dot_%s.png'%icon)))
         ac.setText(text)
-
-

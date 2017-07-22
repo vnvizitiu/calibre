@@ -101,7 +101,7 @@ class RuleEdit(QWidget):
         h.addWidget(q)
         self.tag_editor_button = b = QToolButton(self)
         b.setIcon(QIcon(I('chapters.png')))
-        b.setToolTip(_('Edit the list of tags with the tag editor'))
+        b.setToolTip(_('Edit the list of tags with the Tag editor'))
         h.addWidget(b), b.clicked.connect(self.edit_tags)
         b.setVisible(self.can_use_tag_editor)
         self.h2 = h = QHBoxLayout()
@@ -150,7 +150,7 @@ class RuleEdit(QWidget):
 
     def specialise_context_menu(self, menu):
         if self.can_use_tag_editor:
-            menu.addAction(_('Use the tag editor to edit the list of tags'), self.edit_tags)
+            menu.addAction(_('Use the Tag editor to edit the list of tags'), self.edit_tags)
 
     def edit_tags(self):
         from calibre.gui2.dialogs.tag_editor import TagEditor
@@ -215,6 +215,7 @@ class RuleEditDialog(Dialog):
         if self.edit_widget.validate():
             Dialog.accept(self)
 
+
 DATA_ROLE = Qt.UserRole
 RENDER_ROLE = DATA_ROLE + 1
 
@@ -269,7 +270,7 @@ class Rules(QWidget):
     RuleEditDialogClass = RuleEditDialog
     changed = pyqtSignal()
 
-    MSG = _('You can specify rules to filter/transform tags here. Click the "Add Rule" button'
+    MSG = _('You can specify rules to filter/transform tags here. Click the "Add rule" button'
             ' below to get started. The rules will be processed in order for every tag until either a'
             ' "remove" or a "keep" rule matches.')
 
@@ -384,7 +385,7 @@ class Tester(Dialog):
     DIALOG_TITLE = _('Test tag mapper rules')
     PREFS_NAME = 'test-tag-mapper-rules'
     LABEL = _('Enter a comma separated list of &tags to test:')
-    PLACEHOLDER = _('Enter tags and click the Test button')
+    PLACEHOLDER = _('Enter tags and click the "Test" button')
     EMPTY_RESULT = '<p>&nbsp;<br>&nbsp;</p>'
 
     def __init__(self, rules, parent=None):
@@ -507,6 +508,7 @@ class RulesDialog(Dialog, SaveLoadMixin):
 
     def test_rules(self):
         self.TesterClass(self.rules, self).exec_()
+
 
 if __name__ == '__main__':
     app = Application([])

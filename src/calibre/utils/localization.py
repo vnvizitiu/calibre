@@ -104,6 +104,7 @@ def zf_exists():
     return os.path.exists(P('localization/locales.zip',
                 allow_user_override=False))
 
+
 _lang_trans = None
 
 
@@ -143,6 +144,7 @@ def get_translator(bcp_47_code):
     if lang == 'en':
         return found, lang, NullTranslations()
     return found, lang, get_single_translator(lang)
+
 
 lcdata = {
     u'abday': (u'Sun', u'Mon', u'Tue', u'Wed', u'Thu', u'Fri', u'Sat'),
@@ -216,12 +218,20 @@ def set_translators():
     if t is None:
         t = NullTranslations()
 
+    try:
+        set_translators.lang = t.info().get('language')
+    except Exception:
+        pass
     t.install(unicode=True, names=('ngettext',))
     # Now that we have installed a translator, we have to retranslate the help
     # for the global prefs object as it was instantiated in get_lang(), before
     # the translator was installed.
     from calibre.utils.config_base import prefs
     prefs.retranslate_help()
+
+
+set_translators.lang = None
+
 
 _iso639 = None
 _extra_lang_codes = {
@@ -258,6 +268,7 @@ _extra_lang_codes = {
         'en_YE' : _('English (Yemen)'),
         'en_IE' : _('English (Ireland)'),
         'en_CN' : _('English (China)'),
+        'en_TW' : _('English (Taiwan)'),
         'en_ZA' : _('English (South Africa)'),
         'es_PY' : _('Spanish (Paraguay)'),
         'es_UY' : _('Spanish (Uruguay)'),
@@ -306,6 +317,7 @@ if False:
     _('Fonts')
     _('&Step up')
     _('Step &down')
+    _('Close without Saving')
 
 _lcase_map = {}
 for k in _extra_lang_codes:
@@ -380,6 +392,7 @@ def canonicalize_lang(raw):
 
     return iso639['name_map'].get(raw, None)
 
+
 _lang_map = None
 
 
@@ -421,6 +434,7 @@ def lang_as_iso639_1(name_or_code):
     if code is not None:
         iso639 = _load_iso639()
         return iso639['3to2'].get(code, None)
+
 
 _udc = None
 

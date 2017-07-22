@@ -12,6 +12,7 @@ from io import BytesIO
 from collections import defaultdict, Set, MutableSet
 from functools import wraps, partial
 from future_builtins import zip
+from time import time
 
 from calibre import isbytestring, as_unicode
 from calibre.constants import iswindows, preferred_encoding
@@ -89,6 +90,7 @@ def _add_newbook_tag(mi):
                     mi.tags = [tag]
                 elif tag not in mi.tags:
                     mi.tags.append(tag)
+
 
 dynamic_category_preferences = frozenset({'grouped_search_make_user_categories', 'grouped_search_terms', 'user_categories'})
 
@@ -200,6 +202,10 @@ class Cache(object):
     @write_api
     def initialize_template_cache(self):
         self.formatter_template_cache = {}
+
+    @write_api
+    def set_user_template_functions(self, user_template_functions):
+        self.backend.set_user_template_functions(user_template_functions)
 
     @write_api
     def clear_composite_caches(self, book_ids=None):
@@ -349,12 +355,14 @@ class Cache(object):
             bools_are_tristate = self.backend.prefs['bools_are_tristate']
 
             for field, table in self.backend.tables.iteritems():
-                self.fields[field] = create_field(field, table, bools_are_tristate)
+                self.fields[field] = create_field(field, table, bools_are_tristate,
+                                          self.backend.get_template_functions)
                 if table.metadata['datatype'] == 'composite':
                     self.composites[field] = self.fields[field]
 
             self.fields['ondevice'] = create_field('ondevice',
-                    VirtualTable('ondevice'), bools_are_tristate)
+                    VirtualTable('ondevice'), bools_are_tristate,
+                    self.backend.get_template_functions)
 
             for name, field in self.fields.iteritems():
                 if name[0] == '#' and name.endswith('_index'):
@@ -561,7 +569,7 @@ class Cache(object):
             slow filesystem access is done. The cache values could be out of date
             if access was performed to the filesystem outside of this API.
 
-        :param update_db: If ``True`` The max_size field of the database is updates for this book.
+        :param update_db: If ``True`` The max_size field of the database is updated for this book.
         '''
         if not fmt:
             return {}
@@ -733,7 +741,7 @@ class Cache(object):
     @read_api
     def format_abspath(self, book_id, fmt):
         '''
-        Return absolute path to the ebook file of format `format`. You should
+        Return absolute path to the e-book file of format `format`. You should
         almost never use this, as it breaks the threadsafe promise of this API.
         Instead use, :meth:`copy_format_to`.
 
@@ -825,10 +833,10 @@ class Cache(object):
     @api
     def format(self, book_id, fmt, as_file=False, as_path=False, preserve_filename=False):
         '''
-        Return the ebook format as a bytestring or `None` if the format doesn't exist,
-        or we don't have permission to write to the ebook file.
+        Return the e-book format as a bytestring or `None` if the format doesn't exist,
+        or we don't have permission to write to the e-book file.
 
-        :param as_file: If True the ebook format is returned as a file object. Note
+        :param as_file: If True the e-book format is returned as a file object. Note
                         that the file object is a SpooledTemporaryFile, so if what you want to
                         do is copy the format to another file, use :meth:`copy_format_to`
                         instead for performance.
@@ -978,6 +986,19 @@ class Cache(object):
             be searched instead of searching all books.
         '''
         return self._search_api(self, query, restriction, virtual_fields=virtual_fields, book_ids=book_ids)
+
+    @read_api
+    def books_in_virtual_library(self, vl, search_restriction=None):
+        ' Return the set of books in the specified virtual library '
+        vl = self._pref('virtual_libraries', {}).get(vl) if vl else None
+        if not vl and not search_restriction:
+            return self.all_book_ids()
+        # We utilize the search restriction cache to speed this up
+        if vl:
+            if search_restriction:
+                return frozenset(self._search('', vl) & self._search('', search_restriction))
+            return frozenset(self._search('', vl))
+        return frozenset(self._search('', search_restriction))
 
     @api
     def get_categories(self, sort='name', book_ids=None, already_fixed=None,
@@ -1228,12 +1249,13 @@ class Cache(object):
         if mi contains empty values. In this case, 'None' is distinguished from
         'empty'. If mi.XXX is None, the XXX is not replaced, otherwise it is.
         The tags, identifiers, and cover attributes are special cases. Tags and
-        identifiers cannot be set to None so then will always be replaced if
+        identifiers cannot be set to None so they will always be replaced if
         force_changes is true. You must ensure that mi contains the values you
         want the book to have. Covers are always changed if a new cover is
         provided, but are never deleted. Also note that force_changes has no
         effect on setting title or authors.
         '''
+        dirtied = set()
 
         try:
             # Handle code passing in an OPF object instead of a Metadata object
@@ -1242,7 +1264,7 @@ class Cache(object):
             pass
 
         def set_field(name, val):
-            self._set_field(name, {book_id:val}, do_path_update=False, allow_case_change=allow_case_change)
+            dirtied.update(self._set_field(name, {book_id:val}, do_path_update=False, allow_case_change=allow_case_change))
 
         path_changed = False
         if set_title and mi.title:
@@ -1332,12 +1354,13 @@ class Cache(object):
             # the db and Cache are in sync
             self._reload_from_db()
             raise
+        return dirtied
 
     def _do_add_format(self, book_id, fmt, stream, name=None, mtime=None):
         path = self._field_for('path', book_id)
         if path is None:
             # Theoretically, this should never happen, but apparently it
-            # does: http://www.mobileread.com/forums/showthread.php?t=233353
+            # does: https://www.mobileread.com/forums/showthread.php?t=233353
             self._update_path({book_id}, mark_as_dirtied=False)
             path = self._field_for('path', book_id)
 
@@ -1581,7 +1604,7 @@ class Cache(object):
     def remove_books(self, book_ids, permanent=False):
         ''' Remove the books specified by the book_ids from the database and delete
         their format files. If ``permanent`` is False, then the format files
-        are not deleted. '''
+        are placed in the recycle bin. '''
         path_map = {}
         for book_id in book_ids:
             try:
@@ -2129,6 +2152,30 @@ class Cache(object):
                         self.fields['size'].table.update_sizes({book_id: max_size})
             if report_progress is not None:
                 report_progress(i+1, len(book_ids), mi)
+
+    @read_api
+    def get_last_read_positions(self, book_id, fmt, user):
+        fmt = fmt.upper()
+        ans = []
+        for device, cfi, epoch, pos_frac in self.backend.execute(
+                'SELECT device,cfi,epoch,pos_frac FROM last_read_positions WHERE book=? AND format=? AND user=?',
+                (book_id, fmt, user)):
+            ans.append({'device':device, 'cfi': cfi, 'epoch':epoch, 'pos_frac':pos_frac})
+        return ans
+
+    @write_api
+    def set_last_read_position(self, book_id, fmt, user='_', device='_', cfi=None, epoch=None, pos_frac=0):
+        fmt = fmt.upper()
+        device = device or '_'
+        user = user or '_'
+        if not cfi:
+            self.backend.execute(
+                'DELETE FROM last_read_positions WHERE book=? AND format=? AND user=? AND device=?',
+                (book_id, fmt, user, device))
+        else:
+            self.backend.execute(
+                'INSERT OR REPLACE INTO last_read_positions(book,format,user,device,cfi,epoch,pos_frac) VALUES (?,?,?,?,?,?,?)',
+                (book_id, fmt, user, device, cfi, epoch or time(), pos_frac))
 
     @read_api
     def export_library(self, library_key, exporter, progress=None, abort=None):

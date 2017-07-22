@@ -11,12 +11,13 @@ from threading import Thread
 from PyQt5.Qt import (
     QTextBrowser, QVBoxLayout, QDialog, QDialogButtonBox, QIcon, QLabel,
     QCheckBox, Qt, QListWidgetItem, QHBoxLayout, QListWidget, QPixmap,
-    QSpinBox, QStyledItemDelegate, QSize, QModelIndex, QStyle, QPen,
+    QSpinBox, QStyledItemDelegate, QSize, QStyle, QPen,
     QProgressBar, pyqtSignal
 )
 
 from calibre import human_readable, fit_image, force_unicode
 from calibre.ebooks.oeb.polish.main import CUSTOMIZATION
+from calibre.gui2 import empty_index
 from calibre.gui2.tweak_book import tprefs, current_container, set_current_container
 from calibre.gui2.tweak_book.widgets import Dialog
 from calibre.utils.icu import numeric_sort_key
@@ -122,7 +123,7 @@ class ImageItemDelegate(QStyledItemDelegate):
             index.model().setData(index, pmap, Qt.UserRole+1)
         x, y = (irect.width() - pmap.width())//2, (irect.height() - pmap.height())//2
         r = irect.adjusted(x, y, -x, -y)
-        QStyledItemDelegate.paint(self, painter, option, QModelIndex())
+        QStyledItemDelegate.paint(self, painter, option, empty_index)
         painter.drawPixmap(r, pmap)
         trect = irect.adjusted(irect.width() + 10, 0, 0, 0)
         trect.setRight(option.rect.right())
@@ -136,7 +137,7 @@ class ImageItemDelegate(QStyledItemDelegate):
 class CompressImages(Dialog):
 
     def __init__(self, parent=None):
-        Dialog.__init__(self, _('Compress Images'), 'compress-images', parent=parent)
+        Dialog.__init__(self, _('Compress images'), 'compress-images', parent=parent)
 
     def setup_ui(self):
         from calibre.ebooks.oeb.polish.images import get_compressible_images
@@ -199,7 +200,7 @@ class CompressImagesProgress(Dialog):
         self.names, self.jpeg_quality = names, jpeg_quality
         self.keep_going = True
         self.result = (None, '')
-        Dialog.__init__(self, _('Compressing Images...'), 'compress-images-progress', parent=parent)
+        Dialog.__init__(self, _('Compressing images...'), 'compress-images-progress', parent=parent)
         self.gui_loop.connect(self.update_progress, type=Qt.QueuedConnection)
         self.cidone.connect(self.accept, type=Qt.QueuedConnection)
         t = Thread(name='RunCompressImages', target=self.run_compress)
@@ -252,6 +253,7 @@ class CompressImagesProgress(Dialog):
         self.msg.setText(name)
 
 # }}}
+
 
 if __name__ == '__main__':
     from calibre.gui2 import Application

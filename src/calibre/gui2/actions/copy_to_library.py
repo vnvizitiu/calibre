@@ -98,6 +98,7 @@ class Worker(Thread):  # {{{
 
     def __init__(self, ids, db, loc, progress, done, delete_after, add_duplicates):
         Thread.__init__(self)
+        self.was_canceled = False
         self.ids = ids
         self.processed = set()
         self.db = db
@@ -105,12 +106,16 @@ class Worker(Thread):  # {{{
         self.error = None
         self.progress = progress
         self.done = done
+        self.left_after_cancel = 0
         self.delete_after = delete_after
         self.auto_merged_ids = {}
         self.add_duplicates = add_duplicates
         self.duplicate_ids = {}
         self.check_for_duplicates = not add_duplicates and (prefs['add_formats_to_existing'] or prefs['check_for_dupes_on_ctl'])
         self.failed_books = {}
+
+    def cancel_processing(self):
+        self.was_canceled = True
 
     def run(self):
         try:
@@ -128,22 +133,26 @@ class Worker(Thread):  # {{{
     def add_formats(self, id_, paths, newdb, replace=True):
         for path in paths:
             fmt = os.path.splitext(path)[-1].replace('.', '').upper()
-            with open(path, 'rb') as f:
+            with lopen(path, 'rb') as f:
                 newdb.add_format(id_, fmt, f, index_is_id=True,
                         notify=False, replace=replace)
 
     def doit(self):
-        from calibre.db.legacy import LibraryDatabase
-        newdb = LibraryDatabase(self.loc, is_second_db=True)
-        with closing(newdb):
+        from calibre.gui2.ui import get_gui
+        library_broker = get_gui().library_broker
+        newdb = library_broker.get_library(self.loc)
+        try:
             if self.check_for_duplicates:
                 self.find_identical_books_data = newdb.new_api.data_for_find_identical_books()
             self._doit(newdb)
-        newdb.break_cycles()
-        del newdb
+        finally:
+            library_broker.prune_loaded_dbs()
 
     def _doit(self, newdb):
         for i, x in enumerate(self.ids):
+            if self.was_canceled:
+                self.left_after_cancel = len(self.ids) - i
+                break
             try:
                 self.do_one(i, x, newdb)
             except Exception as err:
@@ -347,6 +356,7 @@ class DuplicatesQuestion(QDialog):  # {{{
 
 # }}}
 
+
 # Static session-long set of pairs of libraries that have had their custom columns
 # checked for compatibility
 libraries_with_checked_columns = defaultdict(set)
@@ -480,7 +490,7 @@ class CopyToLibraryAction(InterfaceAction):
         aname = _('Moving to') if delete_after else _('Copying to')
         dtitle = '%s %s'%(aname, os.path.basename(loc))
         self.pd = ProgressDialog(dtitle, min=0, max=len(ids)-1,
-                parent=self.gui, cancelable=False, icon='lt.png')
+                parent=self.gui, cancelable=True, icon='lt.png')
 
         def progress(idx, title):
             self.pd.set_msg(title)
@@ -489,8 +499,19 @@ class CopyToLibraryAction(InterfaceAction):
         self.worker = Worker(ids, db, loc, Dispatcher(progress),
                              Dispatcher(self.pd.accept), delete_after, add_duplicates)
         self.worker.start()
+        self.pd.canceled_signal.connect(self.worker.cancel_processing)
 
         self.pd.exec_()
+        self.pd.canceled_signal.disconnect()
+
+        if self.worker.left_after_cancel:
+            msg = _('The copying process was interrupted. {} books were copied.').format(len(self.worker.processed))
+            if delete_after:
+                msg += ' ' + _('No books were deleted from this library.')
+            msg += ' ' + _('The best way to resume this operation is to re-copy all the books with the option to'
+                     ' "Check for duplicates when copying to library" in Preferences->Import/export->Adding books turned on.')
+            warning_dialog(self.gui, _('Canceled'), msg, show=True)
+            return
 
         if self.worker.error is not None:
             e, tb = self.worker.error
@@ -508,10 +529,10 @@ class CopyToLibraryAction(InterfaceAction):
             books = '\n'.join(self.worker.auto_merged_ids.itervalues())
             info_dialog(self.gui, _('Auto merged'),
                     _('Some books were automatically merged into existing '
-                        'records in the target library. Click Show '
-                        'details to see which ones. This behavior is '
-                        'controlled by the Auto merge option in '
-                        'Preferences->Adding books.'), det_msg=books,
+                        'records in the target library. Click "Show '
+                        'details" to see which ones. This behavior is '
+                        'controlled by the Auto-merge option in '
+                        'Preferences->Import/export->Adding books.'), det_msg=books,
                     show=True)
         if delete_after and self.worker.processed:
             v = self.gui.library_view

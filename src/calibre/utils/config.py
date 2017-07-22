@@ -11,7 +11,7 @@ from copy import deepcopy
 import optparse
 
 from calibre.constants import (config_dir, CONFIG_DIR_MODE, __appname__,
-        get_version, __author__, DEBUG)
+        get_version, __author__, DEBUG, iswindows)
 from calibre.utils.lock import ExclusiveFile
 from calibre.utils.config_base import (make_config_dir, Option, OptionValues,
         OptionSet, ConfigInterface, Config, prefs, StringConfig, ConfigProxy,
@@ -93,7 +93,8 @@ class OptionParser(optparse.OptionParser):
         if epilog is None:
             epilog = _('Created by ')+colored(__author__, fg='cyan')
         usage += '\n\n'+_('''Whenever you pass arguments to %prog that have spaces in them, '''
-                          '''enclose the arguments in quotation marks. For example "C:\\some path with spaces"''')+'\n'
+                          '''enclose the arguments in quotation marks. For example: "{}"''').format(
+                               "C:\\some path with spaces" if iswindows else '/some path/with spaces') +'\n'
         if version is None:
             version = '%%prog (%s %s)'%(__appname__, get_version())
         optparse.OptionParser.__init__(self, usage=usage, version=version, epilog=epilog,
@@ -258,6 +259,7 @@ class DynamicConfig(dict):
                 f.truncate()
                 f.write(raw)
 
+
 dynamic = DynamicConfig()
 
 
@@ -267,7 +269,7 @@ class XMLConfig(dict):
     Similar to :class:`DynamicConfig`, except that it uses an XML storage
     backend instead of a pickle file.
 
-    See `http://docs.python.org/dev/library/plistlib.html`_ for the supported
+    See `https://docs.python.org/dev/library/plistlib.html`_ for the supported
     data types.
     '''
 
@@ -284,6 +286,18 @@ class XMLConfig(dict):
             self.file_path += self.EXTENSION
 
         self.refresh()
+
+    def mtime(self):
+        try:
+            return os.path.getmtime(self.file_path)
+        except EnvironmentError:
+            return 0
+
+    def touch(self):
+        try:
+            os.utime(self.file_path, None)
+        except EnvironmentError:
+            pass
 
     def raw_to_object(self, raw):
         return plistlib.readPlistFromString(raw)
@@ -428,6 +442,5 @@ class DevicePrefs:
     def __getitem__(self, key):
         return self.overrides.get(key, self.global_prefs[key])
 
+
 device_prefs = DevicePrefs(prefs)
-
-

@@ -36,7 +36,8 @@ def classes(classes):
     return dict(attrs={
         'class': lambda x: x and frozenset(x.split()).intersection(q)})
 
-USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; rv:45.0) Gecko/20100101 Firefox/45.0'
+
+USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; rv:52.0) Gecko/20100101 Firefox/52.0'
 
 
 class WSJ(BasicNewsRecipe):
@@ -66,8 +67,10 @@ class WSJ(BasicNewsRecipe):
     ]
 
     remove_tags = [
-        classes(
-            'insetButton insettipBox author-info media-object-video article_tools nc-exp-artmeta category'),
+        dict(id='right-rail'),
+        dict(id='narrator-nav'),
+        dict(name='div', id='ad_and_popular'),
+        classes('right-rail comments-count-container insetButton insettipBox author-info media-object-video article_tools nc-exp-artmeta category'),
         dict(name='span', attrs={
              'data-country-code': True, 'data-ticker-code': True}),
         dict(name='meta link'.split()),
@@ -93,6 +96,21 @@ class WSJ(BasicNewsRecipe):
         if found:
             self.log.debug('Found %d dynamic images in:' % found)
         return soup
+
+    def get_cover_url(self):
+        cover = 'https://vir.wsj.net/fp/cdn/fp/assets/images/WSJ_A1.jpg'
+        br = BasicNewsRecipe.get_browser(self)
+        try:
+            br.open(cover)
+        except:
+            index = 'http://en.kiosko.net/us/np/wsj.html'
+            soup = self.index_to_soup(index)
+            for image in soup.findAll('img', src=True):
+                if image['src'].endswith('750.jpg'):
+                    return image['src']
+            self.log("\nCover unavailable")
+            cover = None
+        return cover
 
     def get_browser(self):
         # To understand the signin logic read signin.js from
@@ -129,7 +147,11 @@ class WSJ(BasicNewsRecipe):
             raise ValueError(
                 'Failed to login (XHR failed), check username and password')
         br.set_cookie('m', data['username'], '.wsj.com')
-        r = br.open(data['url'])
+        try:
+            r = br.open(data['url'])
+        except Exception:
+            self.log.error('Failed to open login url: {}'.format(data['url']))
+            raise
         self.wsj_itp_page = raw = r.read()
         if b'>Sign Out<' not in raw:
             raise ValueError(
@@ -150,23 +172,26 @@ class WSJ(BasicNewsRecipe):
 
         articles = []
 
-        for a in CSSSelect('a.mjLinkItem[href]')(root):
-            container = a.xpath('ancestor::li')
-            meta = CSSSelect('.meta_sectionName')(a)
-            if meta:
-                meta = meta[0]
-                meta.getparent().remove(meta)
-                meta = self.tag_to_string(meta)
+        for container in root.xpath('//li[contains(@class, "mjItemMain")]'):
+            meta = container.xpath('descendant::span[@class="meta_sectionName"]')
+            if not meta:
+                continue
+            meta = meta[0]
+            a = meta.xpath('ancestor::a')[0]
+            meta.getparent().remove(meta)
+            meta = self.tag_to_string(meta)
             title = self.tag_to_string(a)
             if meta:
                 title += ' [%s]' % meta
             url = self.abs_wsj_url(a.get('href'))
             desc = ''
             if container:
-                for p in CSSSelect('p')(container[0]):
-                    desc = self.tag_to_string(p)
-                    if 'Subscriber Content' not in desc:
-                        break
+                for p in container.xpath('descendant::p'):
+                    q = self.tag_to_string(p)
+                    if 'Subscriber Content' in q:
+                        continue
+                    desc += q
+                    break
 
             articles.append({'title': title, 'url': url,
                              'description': desc, 'date': ''})
@@ -217,14 +242,15 @@ class WSJ(BasicNewsRecipe):
         return articles
 
     def wsj_add_feed(self, feeds, title, url):
-        self.log('Found section:', title)
+        self.log('Found section:', title, '[' + url + ']')
         try:
             if url.endswith('whatsnews'):
                 articles = self.wsj_find_wn_articles(url)
             else:
                 articles = self.wsj_find_articles(
                     url, ahed=title == 'Front Section')
-        except:
+        except Exception:
+            self.log.exception('Failed to parse section:', title)
             articles = []
         if articles:
             feeds.append((title, articles))

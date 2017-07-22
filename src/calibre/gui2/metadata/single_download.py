@@ -183,7 +183,7 @@ class ResultsModel(QAbstractTableModel):  # {{{
             return book
         elif role == Qt.ToolTipRole and col == 3:
             return (
-                _('The has cover indication is not fully\n'
+                _('The "has cover" indication is not fully\n'
                     'reliable. Sometimes results marked as not\n'
                     'having a cover will find a cover in the download\n'
                     'cover stage, and vice versa.'))
@@ -544,7 +544,7 @@ class IdentifyWidget(QWidget):  # {{{
                         'match your search. Try making the search <b>less '
                         'specific</b>. For example, use only the author\'s '
                         'last name and a single distinctive word from '
-                        'the title.<p>To see the full log, click Show Details.'),
+                        'the title.<p>To see the full log, click "Show details".'),
                     show=True, det_msg=log)
             self.rejected.emit()
             return
@@ -1046,7 +1046,7 @@ class FullFetch(QDialog):  # {{{
         self.prev_button = pb = QPushButton(QIcon(I('back.png')), _('&Back'), self)
         pb.clicked.connect(self.back_clicked)
         pb.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.log_button = self.bb.addButton(_('View log'), self.bb.ActionRole)
+        self.log_button = self.bb.addButton(_('&View log'), self.bb.ActionRole)
         self.log_button.clicked.connect(self.view_log)
         self.log_button.setIcon(QIcon(I('debug.png')))
         self.prev_button.setVisible(False)
@@ -1159,7 +1159,7 @@ class CoverFetch(QDialog):  # {{{
 
         self.bb = QDialogButtonBox(QDialogButtonBox.Cancel|QDialogButtonBox.Ok)
         l.addWidget(self.bb)
-        self.log_button = self.bb.addButton(_('View log'), self.bb.ActionRole)
+        self.log_button = self.bb.addButton(_('&View log'), self.bb.ActionRole)
         self.log_button.clicked.connect(self.view_log)
         self.log_button.setIcon(QIcon(I('debug.png')))
         self.bb.rejected.connect(self.reject)
@@ -1194,9 +1194,9 @@ class CoverFetch(QDialog):  # {{{
 
 # }}}
 
+
 if __name__ == '__main__':
     DEBUG_DIALOG = True
     app = QApplication([])
     d = FullFetch()
     d.start(title='great gatsby', authors=['fitzgerald'])
-

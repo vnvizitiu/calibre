@@ -53,7 +53,7 @@ class TextureChooser(QDialog):
         il.itemSelectionChanged.connect(self.update_remove_state)
         l.addWidget(il)
 
-        self.ad = ad = QLabel(_('The builtin textures come from <a href="http://subtlepatterns.com">subtlepatterns.com</a>.'))
+        self.ad = ad = QLabel(_('The builtin textures come from <a href="https://subtlepatterns.com">subtlepatterns.com</a>.'))
         ad.setOpenExternalLinks(True)
         ad.setWordWrap(True)
         l.addWidget(ad)
@@ -108,7 +108,7 @@ class TextureChooser(QDialog):
         return self.selected_fname
 
     def add_texture(self):
-        path = choose_files(self, 'choose-texture-image', _('Choose Image'),
+        path = choose_files(self, 'choose-texture-image', _('Choose image'),
                             filters=[(_('Images'), ['jpeg', 'jpg', 'png'])], all_files=False, select_only_single_file=True)
         if not path:
             return
@@ -146,6 +146,7 @@ class TextureChooser(QDialog):
                                 _('Cannot remove builtin textures'), show=True)
         os.remove(unicode(self.selected_item.data(Qt.UserRole+1) or ''))
         self.images.takeItem(self.images.row(self.selected_item))
+
 
 if __name__ == '__main__':
     app = QApplication([])  # noqa

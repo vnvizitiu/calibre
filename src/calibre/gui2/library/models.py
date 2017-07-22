@@ -12,7 +12,7 @@ from itertools import groupby
 from PyQt5.Qt import (QAbstractTableModel, Qt, pyqtSignal, QIcon, QImage,
         QModelIndex, QDateTime, QColor, QPixmap, QPainter, QApplication)
 
-from calibre import fit_image
+from calibre import fit_image, force_unicode
 from calibre.gui2 import error_dialog
 from calibre.utils.search_query_parser import ParseException
 from calibre.ebooks.metadata import fmt_sidx, authors_to_string, string_to_authors
@@ -37,6 +37,7 @@ Counts = namedtuple('Counts', 'library_total total current')
 def human_readable(size, precision=1):
     """ Convert a size in bytes into megabytes """
     return ('%.'+str(precision)+'f') % ((size/(1024.*1024.)),)
+
 
 TIME_FMT = '%d %b %Y'
 
@@ -333,9 +334,10 @@ class BooksModel(QAbstractTableModel):  # {{{
                 self.new_bookdisplay_data.emit(self.get_book_display_info(current_row))
 
     def close(self):
-        self.db.close()
-        self.db = None
-        self.beginResetModel(), self.endResetModel()
+        if self.db is not None:
+            self.db.close()
+            self.db = None
+            self.beginResetModel(), self.endResetModel()
 
     def add_books(self, paths, formats, metadata, add_duplicates=False,
             return_ids=False):
@@ -383,6 +385,9 @@ class BooksModel(QAbstractTableModel):  # {{{
 
     def delete_books_by_id(self, ids, permanent=False):
         self.db.new_api.remove_books(ids, permanent=permanent)
+        self.ids_deleted(ids)
+
+    def ids_deleted(self, ids):
         self.db.data.books_deleted(tuple(ids))
         self.db.notify('delete', list(ids))
         self.books_deleted()
@@ -1089,11 +1094,11 @@ class BooksModel(QAbstractTableModel):  # {{{
                 import traceback
                 if getattr(err, 'errno', None) == errno.EACCES:  # Permission denied
                     fname = getattr(err, 'filename', None)
-                    p = 'Locked file: %s\n\n'%fname if fname else ''
+                    p = 'Locked file: %s\n\n'%force_unicode(fname if fname else '')
                     error_dialog(get_gui(), _('Permission denied'),
                             _('Could not change the on disk location of this'
                                 ' book. Is it open in another program?'),
-                            det_msg=p+traceback.format_exc(), show=True)
+                            det_msg=p+force_unicode(traceback.format_exc()), show=True)
                     return False
                 error_dialog(get_gui(), _('Failed to set data'),
                         _('Could not set data, click Show Details to see why.'),
@@ -1156,6 +1161,8 @@ class BooksModel(QAbstractTableModel):  # {{{
                 val = val.split(',')
                 self.db.set_languages(id, val)
             else:
+                if column == 'authors' and val:
+                    val = authors_to_string(string_to_authors(val))
                 books_to_refresh |= self.db.set(row, column, val,
                                                 allow_case_change=True)
             self.refresh_ids(list(books_to_refresh), row)
@@ -1710,6 +1717,3 @@ class DeviceBooksModel(BooksModel):  # {{{
             self.editable = []
 
 # }}}
-
-
-

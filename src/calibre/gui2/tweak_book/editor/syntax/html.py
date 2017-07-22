@@ -23,9 +23,7 @@ from calibre.gui2.tweak_book.editor.syntax.base import SyntaxHighlighter, run_lo
 from calibre.gui2.tweak_book.editor.syntax.css import (
     create_formats as create_css_formats, state_map as css_state_map, CSSState, CSSUserData)
 
-from html5lib.constants import cdataElements, rcdataElements
-
-cdata_tags = cdataElements | rcdataElements
+cdata_tags = frozenset(['title', 'textarea', 'style', 'script', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript'])
 normal_pat = re.compile(r'[^<>&]+')
 entity_pat = re.compile(r'&#{0,1}[a-zA-Z0-9]{1,8};')
 tag_name_pat = re.compile(r'/{0,1}[a-zA-Z0-9:-]+')
@@ -51,6 +49,7 @@ CSS = 11
 
 TagStart = namedtuple('TagStart', 'offset prefix name closing is_start')
 TagEnd = namedtuple('TagEnd', 'offset self_closing is_start')
+NonTagBoundary = namedtuple('NonTagBoundary', 'offset is_start type')
 Attr = namedtuple('Attr', 'offset type data')
 
 LINK_ATTRS = frozenset(('href', 'src', 'poster', 'xlink:href'))
@@ -61,6 +60,7 @@ do_spell_check = False
 def refresh_spell_check_status():
     global do_spell_check
     do_spell_check = tprefs['inline_spell_check'] and hasattr(dictionaries, 'active_user_dictionaries')
+
 
 from calibre.constants import plugins
 
@@ -193,7 +193,7 @@ def close_tag(state, name):
             break
     else:
         return  # No matching open tag found, ignore the closing tag
-    # Remove all tags upto the matching open tag
+    # Remove all tags up to the matching open tag
     state.tags = state.tags[:-len(removed_tags)]
     state.sub_parser_state = None
     # Check if we should still be bold or italic
@@ -223,12 +223,13 @@ class HTMLUserData(QTextBlockUserData):
         QTextBlockUserData.__init__(self)
         self.tags = []
         self.attributes = []
+        self.non_tag_structures = []
         self.state = State()
         self.css_user_data = None
         self.doc_name = None
 
     def clear(self, state=None, doc_name=None):
-        self.tags, self.attributes = [], []
+        self.tags, self.attributes, self.non_tag_structures = [], [], []
         self.state = State() if state is None else state
         self.doc_name = doc_name
 
@@ -246,6 +247,7 @@ class XMLUserData(HTMLUserData):
 
 def add_tag_data(user_data, tag):
     user_data.tags.append(tag)
+
 
 ATTR_NAME, ATTR_VALUE, ATTR_START, ATTR_END = object(), object(), object(), object()
 
@@ -333,14 +335,17 @@ def normal(state, text, i, formats, user_data):
     if ch == '<':
         if text[i:i+4] == '<!--':
             state.parse, fmt = IN_COMMENT, formats['comment']
+            user_data.non_tag_structures.append(NonTagBoundary(i, True, IN_COMMENT))
             return [(4, fmt)]
 
         if text[i:i+2] == '<?':
             state.parse, fmt = IN_PI, formats['preproc']
+            user_data.non_tag_structures.append(NonTagBoundary(i, True, IN_PI))
             return [(2, fmt)]
 
         if text[i:i+2] == '<!' and text[i+2:].lstrip().lower().startswith('doctype'):
             state.parse, fmt = IN_DOCTYPE, formats['preproc']
+            user_data.non_tag_structures.append(NonTagBoundary(i, True, IN_DOCTYPE))
             return [(2, fmt)]
 
         m = tag_name_pat.match(text, i + 1)
@@ -497,9 +502,11 @@ def in_comment(state, text, i, formats, user_data):
     if pos == -1:
         num = len(text) - i
     else:
+        user_data.non_tag_structures.append(NonTagBoundary(pos, False, state.parse))
         num = pos - i + len(end)
         state.parse = NORMAL
     return [(num, fmt)]
+
 
 state_map = {
     NORMAL:normal,
@@ -615,6 +622,7 @@ def profile():
     del h
     del doc
     del app
+
 
 if __name__ == '__main__':
     from calibre.gui2.tweak_book.editor.widget import launch_editor

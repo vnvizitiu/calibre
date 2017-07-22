@@ -93,13 +93,13 @@ def shorten_components_to(length, components, more_to_take=0, last_has_extension
 def find_executable_in_path(name, path=None):
     if path is None:
         path = os.environ.get('PATH', '')
-    if iswindows and not name.endswith('.exe'):
-        name += '.exe'
+    exts = '.exe .cmd .bat'.split() if iswindows and not name.endswith('.exe') else ('',)
     path = path.split(os.pathsep)
     for x in path:
-        q = os.path.abspath(os.path.join(x, name))
-        if os.access(q, os.X_OK):
-            return q
+        for ext in exts:
+            q = os.path.abspath(os.path.join(x, name)) + ext
+            if os.access(q, os.X_OK):
+                return q
 
 
 def is_case_sensitive(path):
@@ -246,7 +246,7 @@ def samefile(src, dst):
 
     Returns True iff both paths exist and point to the same file on disk.
 
-    Note: On windows will return True if the two string are identical (upto
+    Note: On windows will return True if the two string are identical (up to
     case) even if the file does not exist. This is because I have no way of
     knowing how reliable the GetFileInformationByHandle method is.
     '''
@@ -524,6 +524,7 @@ def remove_dir_if_empty(path, ignore_metadata_caches=False):
                     remove_dir_if_empty(path)
             return
         raise
+
 
 if iswindows:
     # Python's expanduser is broken for non-ASCII usernames

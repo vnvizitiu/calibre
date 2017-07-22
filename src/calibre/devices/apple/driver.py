@@ -30,6 +30,7 @@ def strftime(fmt='%Y/%m/%d %H:%M:%S', dt=None):
     except:
         return _strftime(fmt, now().timetuple())
 
+
 _log = None
 
 
@@ -63,12 +64,12 @@ class AppleOpenFeedback(OpenFeedback):
                 msg.setText(_(
                             '<p>If you do not want calibre to recognize your Apple iDevice '
                             'when it is connected to your computer, '
-                            'click <b>Disable Apple Driver</b>.</p>'
+                            'click <b>Disable Apple driver</b>.</p>'
                             '<p>To transfer books to your iDevice, '
-                            'click <b>Disable Apple Driver</b>, '
+                            'click <b>Disable Apple driver</b>, '
                             "then use the 'Connect to iTunes' method recommended in the "
-                            '<a href="http://www.mobileread.com/forums/showthread.php?t=118559">Calibre + iDevices FAQ</a>, '
-                            'using the <em>Connect/Share</em>|<em>Connect to iTunes</em> menu item.</p>'
+                            '<a href="https://www.mobileread.com/forums/showthread.php?t=118559">Calibre + iDevices FAQ</a>, '
+                            'using the <em>Connect/share</em>--<em>Connect to iTunes</em> menu item.</p>'
                             '<p>Enabling the Apple driver for direct connection to iDevices '
                             'is an unsupported advanced user mode.</p>'
                             '<p></p>'
@@ -121,8 +122,8 @@ class DriverBase(DeviceConfig, DevicePlugin):
 
     EXTRA_CUSTOMIZATION_MESSAGE = [
             _('Use Series as Category in iTunes/iBooks') +
-            ':::' + _('Enable to use the series name as the iTunes Genre, '
-                    'iBooks Category'),
+            ':::' + _('Enable to use the series name as the iTunes genre, '
+                    'iBooks category'),
             _('Cache covers from iTunes/iBooks') + ':::' + _(
                 'Enable to cache and display covers from iTunes/iBooks'),
             _(u'"Copy files to iTunes Media folder %s" is enabled in iTunes Preferences|Advanced') % u'\u2026' + ':::' + _(
@@ -216,18 +217,18 @@ class ITUNES(DriverBase):
     DEBUG_LOGGING = 3
 
     OPEN_FEEDBACK_MESSAGE = _(
-        'Apple iDevice detected, launching iTunes, please wait ...')
+        'Apple iDevice detected, launching iTunes, please wait...')
     BACKLOADING_ERROR_MESSAGE = _(
         "Cannot copy books directly from iDevice. "
         "Drag from iTunes Library to desktop, then add to calibre's Library window.")
     UNSUPPORTED_DIRECT_CONNECT_MODE_MESSAGE = _(
         "*** Unsupported direct connect mode. "
-        "See http://www.mobileread.com/forums/showthread.php?t=118559 "
+        "See https://www.mobileread.com/forums/showthread.php?t=118559 "
         "for instructions on using 'Connect to iTunes' ***")
     ITUNES_SANDBOX_LOCKOUT_MESSAGE = _(
         '<p>Unable to communicate with iTunes.</p>'
         '<p>Refer to this '
-        '<a href="http://www.mobileread.com/forums/showpost.php?p=2113958&postcount=3">forum post</a> '
+        '<a href="https://www.mobileread.com/forums/showpost.php?p=2113958&postcount=3">forum post</a> '
         'for more information.</p>'
         '<p></p>')
 
@@ -719,7 +720,7 @@ class ITUNES(DriverBase):
         self.problem_titles = []
         self.problem_msg = _("Some books not found in iTunes database.\n"
                               "Delete using the iBooks app.\n"
-                              "Click 'Show Details' for a list.")
+                              "Click 'Show details' for a list.")
         logger().info("%s.delete_books()" % self.__class__.__name__)
         for path in paths:
             if self.cached_books[path]['lib_book']:
@@ -3646,7 +3647,7 @@ class BookList(list):
         self.log = log
 
     def supports_collections(self):
-        ''' Return True if the the device supports collections for this book list. '''
+        ''' Return True if the device supports collections for this book list. '''
         return False
 
     def add_book(self, book, replace_metadata):

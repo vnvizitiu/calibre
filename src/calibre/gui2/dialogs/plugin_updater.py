@@ -90,7 +90,7 @@ def get_installed_plugin_status(display_plugin):
     display_plugin.installed_version = None
     display_plugin.plugin = None
     for plugin in initialized_plugins():
-        if plugin.name == display_plugin.name and plugin.plugin_path is not None:
+        if plugin.name == display_plugin.qname and plugin.plugin_path is not None:
             display_plugin.plugin = plugin
             display_plugin.installed_version = plugin.version
             break
@@ -125,7 +125,7 @@ class ImageTitleLayout(QHBoxLayout):
         pixmap.load(I(icon_name))
         if pixmap is None:
             error_dialog(parent, _('Restart required'),
-                         _('You must restart Calibre before using this plugin!'), show=True)
+                         _('You must restart calibre before using this plugin!'), show=True)
         else:
             title_image_label.setPixmap(pixmap)
         title_image_label.setMaximumSize(32, 32)
@@ -196,6 +196,7 @@ class DisplayPlugin(object):
 
     def __init__(self, plugin):
         self.name = plugin['index_name']
+        self.qname = plugin.get('name', self.name)
         self.forum_link = plugin['thread_url']
         self.zip_url = SERVER + plugin['file']
         self.installed_version = None
@@ -275,8 +276,8 @@ class DisplayPluginModel(QAbstractTableModel):
     def __init__(self, display_plugins):
         QAbstractTableModel.__init__(self)
         self.display_plugins = display_plugins
-        self.headers = map(unicode, [_('Plugin Name'), _('Donate'), _('Status'), _('Installed'),
-                                      _('Available'), _('Released'), _('Calibre'), _('Author')])
+        self.headers = map(unicode, [_('Plugin name'), _('Donate'), _('Status'), _('Installed'),
+                                      _('Available'), _('Released'), _('calibre'), _('Author')])
 
     def rowCount(self, *args):
         return len(self.display_plugins)
@@ -362,7 +363,7 @@ class DisplayPluginModel(QAbstractTableModel):
         if not display_plugin.is_valid_platform():
             return _('Platform unavailable')
         if not display_plugin.is_valid_calibre():
-            return _('Calibre upgrade required')
+            return _('calibre upgrade required')
         if display_plugin.is_installed():
             if display_plugin.is_deprecated:
                 return _('Plugin deprecated')
@@ -407,7 +408,7 @@ class DisplayPluginModel(QAbstractTableModel):
                             ', '.join(display_plugin.platforms)+'\n\n'+
                             _('Right-click to see more options'))
         if numeric_version < display_plugin.calibre_required_version:
-            return (_('You must upgrade to at least Calibre %s before installing this plugin') %
+            return (_('You must upgrade to at least calibre %s before installing this plugin') %
                             self._get_display_version(display_plugin.calibre_required_version)+'\n\n'+
                             _('Right-click to see more options'))
         if display_plugin.installed_version < display_plugin.available_version:
@@ -466,7 +467,7 @@ class PluginUpdaterDialog(SizePersistedDialog):
         layout = QVBoxLayout(self)
         self.setLayout(layout)
         title_layout = ImageTitleLayout(self, 'plugins/plugin_updater.png',
-                _('User Plugins'))
+                _('User plugins'))
         layout.addLayout(title_layout)
 
         header_layout = QHBoxLayout()
@@ -474,13 +475,17 @@ class PluginUpdaterDialog(SizePersistedDialog):
         self.filter_combo = PluginFilterComboBox(self)
         self.filter_combo.setMinimumContentsLength(20)
         self.filter_combo.currentIndexChanged[int].connect(self._filter_combo_changed)
-        header_layout.addWidget(QLabel(_('Filter list of plugins')+':', self))
+        la = QLabel(_('Filter list of &plugins')+':', self)
+        la.setBuddy(self.filter_combo)
+        header_layout.addWidget(la)
         header_layout.addWidget(self.filter_combo)
         header_layout.addStretch(10)
 
         # filter plugins by name
-        header_layout.addWidget(QLabel(_('Filter by name')+':', self))
+        la = QLabel(_('Filter by &name')+':', self)
+        header_layout.addWidget(la)
         self.filter_by_name_lineedit = QLineEdit(self)
+        la.setBuddy(self.filter_by_name_lineedit)
         self.filter_by_name_lineedit.setText("")
         self.filter_by_name_lineedit.textChanged.connect(self._filter_name_lineedit_changed)
 
@@ -536,12 +541,12 @@ class PluginUpdaterDialog(SizePersistedDialog):
         self.install_action.triggered.connect(self._install_clicked)
         self.install_action.setEnabled(False)
         self.plugin_view.addAction(self.install_action)
-        self.history_action = QAction(QIcon(I('chapters.png')), _('Version &History'), self)
+        self.history_action = QAction(QIcon(I('chapters.png')), _('Version &history'), self)
         self.history_action.setToolTip(_('Show history of changes to this plugin'))
         self.history_action.triggered.connect(self._history_clicked)
         self.history_action.setEnabled(False)
         self.plugin_view.addAction(self.history_action)
-        self.forum_action = QAction(QIcon(I('plugins/mobileread.png')), _('Plugin &Forum Thread'), self)
+        self.forum_action = QAction(QIcon(I('plugins/mobileread.png')), _('Plugin &forum thread'), self)
         self.forum_action.triggered.connect(self._forum_label_activated)
         self.forum_action.setEnabled(False)
         self.plugin_view.addAction(self.forum_action)
@@ -550,7 +555,7 @@ class PluginUpdaterDialog(SizePersistedDialog):
         sep1.setSeparator(True)
         self.plugin_view.addAction(sep1)
 
-        self.toggle_enabled_action = QAction(_('Enable/&Disable plugin'), self)
+        self.toggle_enabled_action = QAction(_('Enable/&disable plugin'), self)
         self.toggle_enabled_action.setToolTip(_('Enable or disable this plugin'))
         self.toggle_enabled_action.triggered.connect(self._toggle_enabled_clicked)
         self.toggle_enabled_action.setEnabled(False)
@@ -664,7 +669,7 @@ class PluginUpdaterDialog(SizePersistedDialog):
                 if DEBUG:
                     prints('Removing uninstall dependency for: ', display_plugin.name)
                 display_plugin.uninstall_plugins.remove(name_to_remove)
-            if display_plugin.name == name_to_remove:
+            if display_plugin.qname == name_to_remove:
                 if DEBUG:
                     prints('Resetting plugin to uninstalled status: ', display_plugin.name)
                 display_plugin.installed_version = None
@@ -679,7 +684,7 @@ class PluginUpdaterDialog(SizePersistedDialog):
                    _('Are you sure you want to uninstall the <b>%s</b> plugin?')%display_plugin.name,
                    show_copy_button=False):
             return
-        self._uninstall_plugin(display_plugin.name)
+        self._uninstall_plugin(display_plugin.qname)
         if self.proxy_model.filter_criteria in [FILTER_INSTALLED, FILTER_UPDATE_AVAILABLE]:
             self.model.beginResetModel(), self.model.endResetModel()
             self._select_and_focus_view()
@@ -705,8 +710,8 @@ class PluginUpdaterDialog(SizePersistedDialog):
 
         plugin_zip_url = display_plugin.zip_url
         if DEBUG:
-            prints('Downloading plugin zip attachment: ', plugin_zip_url)
-        self.gui.status_bar.showMessage(_('Downloading plugin zip attachment: %s') % plugin_zip_url)
+            prints('Downloading plugin ZIP attachment: ', plugin_zip_url)
+        self.gui.status_bar.showMessage(_('Downloading plugin ZIP attachment: %s') % plugin_zip_url)
         zip_path = self._download_zip(plugin_zip_url)
 
         if DEBUG:
@@ -732,7 +737,7 @@ class PluginUpdaterDialog(SizePersistedDialog):
                         ' {1} plugins</b>. You may have to restart calibre '
                         'for the plugin to take effect.').format(plugin.name, plugin.type),
                     show_copy_button=False)
-            b = d.bb.addButton(_('Restart calibre now'), d.bb.AcceptRole)
+            b = d.bb.addButton(_('&Restart calibre now'), d.bb.AcceptRole)
             b.setIcon(QIcon(I('lt.png')))
             d.do_restart = False
 
@@ -751,11 +756,11 @@ class PluginUpdaterDialog(SizePersistedDialog):
             if DEBUG:
                 prints('ERROR occurred while installing plugin: %s'%display_plugin.name)
                 traceback.print_exc()
-            error_dialog(self.gui, _('Install Plugin Failed'),
+            error_dialog(self.gui, _('Install plugin failed'),
                          _('A problem occurred while installing this plugin.'
                            ' This plugin will now be uninstalled.'
                            ' Please post the error message in details below into'
-                           ' the forum thread for this plugin and restart Calibre.'),
+                           ' the forum thread for this plugin and restart calibre.'),
                          det_msg=traceback.format_exc(), show=True)
             if DEBUG:
                 prints('Due to error now uninstalling plugin: %s'%display_plugin.name)

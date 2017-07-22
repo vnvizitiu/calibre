@@ -1,10 +1,12 @@
-from future_builtins import map
+#!/usr/bin/env python2
+# vim:fileencoding=utf-8
+# License: GPLv3 Copyright: 2015, Kovid Goyal <kovid at kovidgoyal.net>
 
-__license__   = 'GPL v3'
-__copyright__ = '2008, Kovid Goyal kovid@kovidgoyal.net'
-__docformat__ = 'restructuredtext en'
+from future_builtins import map
+import sys, locale, codecs, os, importlib, collections
+
 __appname__   = u'calibre'
-numeric_version = (2, 71, 0)
+numeric_version = (3, 4, 0)
 __version__   = u'.'.join(map(unicode, numeric_version))
 __author__    = u"Kovid Goyal <kovid@kovidgoyal.net>"
 
@@ -12,7 +14,6 @@ __author__    = u"Kovid Goyal <kovid@kovidgoyal.net>"
 Various run time constants.
 '''
 
-import sys, locale, codecs, os, importlib, collections
 
 _plat = sys.platform.lower()
 iswindows = 'win32' in _plat or 'win64' in _plat
@@ -22,17 +23,25 @@ isfreebsd = 'freebsd' in _plat
 isnetbsd = 'netbsd' in _plat
 isdragonflybsd = 'dragonfly' in _plat
 isbsd = isfreebsd or isnetbsd or isdragonflybsd
-islinux   = not(iswindows or isosx or isbsd)
+ishaiku = 'haiku1' in _plat
+islinux   = not(iswindows or isosx or isbsd or ishaiku)
 isfrozen  = hasattr(sys, 'frozen')
-isunix = isosx or islinux
+isunix = isosx or islinux or ishaiku
 isportable = os.environ.get('CALIBRE_PORTABLE_BUILD', None) is not None
 ispy3 = sys.version_info.major > 2
-isxp = iswindows and sys.getwindowsversion().major < 6
+isxp = isoldvista = False
+if iswindows:
+    wver = sys.getwindowsversion()
+    isxp = wver.major < 6
+    isoldvista = wver.build < 6002
 is64bit = sys.maxsize > (1 << 32)
 isworker = 'CALIBRE_WORKER' in os.environ or 'CALIBRE_SIMPLE_WORKER' in os.environ
 if isworker:
     os.environ.pop('CALIBRE_FORCE_ANSI', None)
-
+FAKE_PROTOCOL, FAKE_HOST = 'https', 'calibre-internal.invalid'
+VIEWER_APP_UID = 'com.calibre-ebook.viewer'
+EDITOR_APP_UID = 'com.calibre-ebook.edit-book'
+MAIN_APP_UID = 'com.calibre-ebook.main-gui'
 try:
     preferred_encoding = locale.getpreferredencoding()
     codecs.lookup(preferred_encoding)
@@ -62,6 +71,7 @@ def get_osx_version():
             _osx_ver = OSX(0, 0, 0)
     return _osx_ver
 
+
 filesystem_encoding = sys.getfilesystemencoding()
 if filesystem_encoding is None:
     filesystem_encoding = 'utf-8'
@@ -77,12 +87,13 @@ else:
         filesystem_encoding = 'utf-8'
 
 
-DEBUG = False
+DEBUG = b'CALIBRE_DEBUG' in os.environ
 
 
 def debug():
     global DEBUG
     DEBUG = True
+
 
 _cache_dir = None
 
@@ -147,17 +158,14 @@ class Plugins(collections.Mapping):
                 'zlib2',
                 'html',
                 'freetype',
-                'unrar',
                 'imageops',
                 'qt_hack',
-                '_regex',
                 'hunspell',
                 '_patiencediff_c',
                 'bzzdec',
                 'matcher',
                 'tokenizer',
                 'certgen',
-                'dukpy',
                 'lzma_binding',
             ]
         if iswindows:
@@ -248,13 +256,17 @@ else:
 # }}}
 
 
+dv = os.environ.get('CALIBRE_DEVELOP_FROM')
+is_running_from_develop = bool(getattr(sys, 'frozen', False) and dv and os.path.abspath(dv) in sys.path)
+del dv
+
+
 def get_version():
     '''Return version string for display to user '''
-    dv = os.environ.get('CALIBRE_DEVELOP_FROM', None)
     v = __version__
     if numeric_version[-1] == 0:
         v = v[:-2]
-    if getattr(sys, 'frozen', False) and dv and os.path.abspath(dv) in sys.path:
+    if is_running_from_develop:
         v += '*'
     if iswindows and is64bit:
         v += ' [64bit]'
@@ -320,6 +332,7 @@ def get_windows_user_locale_name():
     if n == 0:
         return None
     return u'_'.join(buf.value.split(u'-')[:2])
+
 
 number_formats = None
 

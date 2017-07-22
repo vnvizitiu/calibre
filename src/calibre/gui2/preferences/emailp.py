@@ -5,7 +5,7 @@ __license__   = 'GPL v3'
 __copyright__ = '2010, Kovid Goyal <kovid@kovidgoyal.net>'
 __docformat__ = 'restructuredtext en'
 
-import textwrap
+import textwrap, re
 
 from PyQt5.Qt import QAbstractTableModel, QFont, Qt
 
@@ -109,7 +109,7 @@ class EmailAccounts(QAbstractTableModel):  # {{{
             if col == 0:
                 return (account)
             if col ==  1:
-                return (self.accounts[account][0])
+                return ', '.join(x.strip() for x in (self.accounts[account][0] or '').split(','))
             if col == 2:
                 return (self.subjects.get(account, ''))
             if col == 4:
@@ -148,7 +148,7 @@ class EmailAccounts(QAbstractTableModel):  # {{{
             if aval:
                 self.tags[account] = aval
         elif col == 1:
-            self.accounts[account][0] = unicode(value or '').upper()
+            self.accounts[account][0] = re.sub(',+', ',', re.sub(r'\s+', ',', unicode(value or '').upper()))
         elif col == 0:
             na = unicode(value or '')
             from email.utils import parseaddr
@@ -284,7 +284,6 @@ class ConfigWidget(ConfigWidgetBase, Ui_Form):
 
 
 if __name__ == '__main__':
-    from PyQt5.Qt import QApplication
-    app = QApplication([])
+    from calibre.gui2 import Application
+    app = Application([])
     test_widget('Sharing', 'Email')
-

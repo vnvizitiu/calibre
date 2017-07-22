@@ -16,9 +16,9 @@ from calibre.constants import cache_dir, iswindows
 from calibre.customize.ui import plugin_for_input_format
 from calibre.srv.metadata import book_as_json
 from calibre.srv.render_book import RENDER_VERSION
-from calibre.srv.errors import HTTPNotFound
+from calibre.srv.errors import HTTPNotFound, BookNotFound
 from calibre.srv.routes import endpoint, json
-from calibre.srv.utils import get_library_data
+from calibre.srv.utils import get_library_data, get_db
 
 cache_lock = RLock()
 queued_jobs = {}
@@ -30,6 +30,7 @@ def abspath(x):
     if iswindows and not x.startswith('\\\\?\\'):
         x = '\\\\?\\' + os.path.abspath(x)
     return x
+
 
 _books_cache_dir = None
 
@@ -50,8 +51,9 @@ def books_cache_dir():
 
 
 def book_hash(library_uuid, book_id, fmt, size, mtime):
-    raw = dumps((library_uuid, book_id, fmt.upper(), size, mtime), RENDER_VERSION)
+    raw = dumps((library_uuid, book_id, fmt.upper(), size, mtime, RENDER_VERSION))
     return sha1(raw).hexdigest().decode('ascii')
+
 
 staging_cleaned = False
 
@@ -81,6 +83,7 @@ def queue_job(ctx, copy_format_to, bhash, fmt, book_id, size, mtime):
         job_done_callback=job_done, job_data=(bhash, pathtoebook, tdir))
     queued_jobs[bhash] = job_id
     return job_id
+
 
 last_final_clean_time = 0
 
@@ -127,8 +130,8 @@ def book_manifest(ctx, rd, book_id, fmt):
     force_reload = rd.query.get('force_reload') == '1'
     if plugin_for_input_format(fmt) is None:
         raise HTTPNotFound('The format %s cannot be viewed' % fmt.upper())
-    if book_id not in ctx.allowed_book_ids(rd, db):
-        raise HTTPNotFound('No book with id: %s in library: %s' % (book_id, library_id))
+    if not ctx.has_id(rd, db, book_id):
+        raise BookNotFound(book_id, db)
     with db.safe_read_lock:
         fm = db.format_metadata(book_id, fmt)
         if not fm:
@@ -144,6 +147,8 @@ def book_manifest(ctx, rd, book_id, fmt):
                 with lopen(mpath, 'rb') as f:
                     ans = jsonlib.load(f)
                 ans['metadata'] = book_as_json(db, book_id)
+                user = rd.username or None
+                ans['last_read_positions'] = db.get_last_read_positions(book_id, fmt, user)
                 return ans
             except EnvironmentError as e:
                 if e.errno != errno.ENOENT:
@@ -161,8 +166,8 @@ def book_manifest(ctx, rd, book_id, fmt):
 @endpoint('/book-file/{book_id}/{fmt}/{size}/{mtime}/{+name}', types={'book_id':int, 'size':int, 'mtime':int})
 def book_file(ctx, rd, book_id, fmt, size, mtime, name):
     db, library_id = get_library_data(ctx, rd)[:2]
-    if book_id not in ctx.allowed_book_ids(rd, db):
-        raise HTTPNotFound('No book with id: %s in library: %s' % (book_id, library_id))
+    if not ctx.has_id(rd, db, book_id):
+        raise BookNotFound(book_id, db)
     bhash = book_hash(db.library_id, book_id, fmt, size, mtime)
     base = abspath(os.path.join(books_cache_dir(), 'f'))
     mpath = abspath(os.path.join(base, bhash, name))
@@ -174,6 +179,47 @@ def book_file(ctx, rd, book_id, fmt, size, mtime, name):
         if e.errno != errno.ENOENT:
             raise
         raise HTTPNotFound('No book file with hash: %s and name: %s' % (bhash, name))
+
+
+@endpoint('/book-get-last-read-position/{library_id}/{+which}', postprocess=json)
+def get_last_read_position(ctx, rd, library_id, which):
+    '''
+    Get last read position data for the specified books, where which is of the form:
+    book_id1-fmt1_book_id2-fmt2,...
+    '''
+    db = get_db(ctx, rd, library_id)
+    user = rd.username or None
+    ans = {}
+    allowed_book_ids = ctx.allowed_book_ids(rd, db)
+    for item in which.split('_'):
+        book_id, fmt = item.partition('-')[::2]
+        try:
+            book_id = int(book_id)
+        except Exception:
+            continue
+        if book_id not in allowed_book_ids:
+            continue
+        key = '{}:{}'.format(book_id, fmt)
+        ans[key] = db.get_last_read_positions(book_id, fmt, user)
+    return ans
+
+
+@endpoint('/book-set-last-read-position/{library_id}/{book_id}/{+fmt}', types={'book_id': int}, methods=('POST',))
+def set_last_read_position(ctx, rd, library_id, book_id, fmt):
+    db = get_db(ctx, rd, library_id)
+    user = rd.username or None
+    if not ctx.has_id(rd, db, book_id):
+        raise BookNotFound(book_id, db)
+    try:
+        data = jsonlib.load(rd.request_body_file)
+        device, cfi, pos_frac = data['device'], data['cfi'], data['pos_frac']
+    except Exception:
+        raise HTTPNotFound('Invalid data')
+    db.set_last_read_position(
+        book_id, fmt, user=user, device=device, cfi=cfi or None, pos_frac=pos_frac)
+    rd.outheaders['Content-type'] = 'text/plain'
+    return b''
+
 
 mathjax_lock = Lock()
 mathjax_manifest = None

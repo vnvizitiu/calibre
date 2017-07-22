@@ -121,6 +121,7 @@ class Styles(object):
         self.default_styles = {}
         self.tables = tables
         self.numbering_style_links = {}
+        self.default_paragraph_style = self.default_character_style = None
 
     def __iter__(self):
         for s in self.id_map.itervalues():
@@ -137,32 +138,32 @@ class Styles(object):
 
     def __call__(self, root, fonts, theme):
         self.fonts, self.theme = fonts, theme
-        for s in self.namespace.XPath('//w:style')(root):
-            s = Style(self.namespace, s)
-            if s.style_id:
-                self.id_map[s.style_id] = s
-            if s.is_default:
-                self.default_styles[s.style_type] = s
-            if getattr(s, 'numbering_style_link', None) is not None:
-                self.numbering_style_links[s.style_id] = s.numbering_style_link
-
         self.default_paragraph_style = self.default_character_style = None
+        if root is not None:
+            for s in self.namespace.XPath('//w:style')(root):
+                s = Style(self.namespace, s)
+                if s.style_id:
+                    self.id_map[s.style_id] = s
+                if s.is_default:
+                    self.default_styles[s.style_type] = s
+                if getattr(s, 'numbering_style_link', None) is not None:
+                    self.numbering_style_links[s.style_id] = s.numbering_style_link
 
-        for dd in self.namespace.XPath('./w:docDefaults')(root):
-            for pd in self.namespace.XPath('./w:pPrDefault')(dd):
-                for pPr in self.namespace.XPath('./w:pPr')(pd):
-                    ps = ParagraphStyle(self.namespace, pPr)
-                    if self.default_paragraph_style is None:
-                        self.default_paragraph_style = ps
-                    else:
-                        self.default_paragraph_style.update(ps)
-            for pd in self.namespace.XPath('./w:rPrDefault')(dd):
-                for pPr in self.namespace.XPath('./w:rPr')(pd):
-                    ps = RunStyle(self.namespace, pPr)
-                    if self.default_character_style is None:
-                        self.default_character_style = ps
-                    else:
-                        self.default_character_style.update(ps)
+            for dd in self.namespace.XPath('./w:docDefaults')(root):
+                for pd in self.namespace.XPath('./w:pPrDefault')(dd):
+                    for pPr in self.namespace.XPath('./w:pPr')(pd):
+                        ps = ParagraphStyle(self.namespace, pPr)
+                        if self.default_paragraph_style is None:
+                            self.default_paragraph_style = ps
+                        else:
+                            self.default_paragraph_style.update(ps)
+                for pd in self.namespace.XPath('./w:rPrDefault')(dd):
+                    for pPr in self.namespace.XPath('./w:rPr')(pd):
+                        ps = RunStyle(self.namespace, pPr)
+                        if self.default_character_style is None:
+                            self.default_character_style = ps
+                        else:
+                            self.default_character_style.update(ps)
 
         def resolve(s, p):
             if p is not None:
@@ -456,18 +457,19 @@ class Styles(object):
 
             h1.notes-header { page-break-before: always }
 
-            dl.notes dt { font-size: large }
+            dl.footnote dt { font-size: large }
 
-            dl.notes dt a { text-decoration: none }
+            dl.footnote dt a { text-decoration: none }
 
             '''
 
         if not notes_nopb:
-            s = s + 'dl.notes dd { page-break-after: always }'
+            s += '''\
+            dl.footnote { page-break-after: always }
+            dl.footnote:last-of-type { page-break-after: avoid }
+            '''
 
         s = s + '''\
-            dl.notes dd:last-of-type { page-break-after: avoid }
-
             span.tab { white-space: pre }
 
             p.index-entry { text-indent: 0pt; }

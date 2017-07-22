@@ -9,11 +9,11 @@ from PyQt5.QtWidgets import QStyle  # Gives a nicer error message than import fr
 from PyQt5.Qt import (
     QFileInfo, QObject, QBuffer, Qt, QByteArray, QTranslator, QSocketNotifier,
     QCoreApplication, QThread, QEvent, QTimer, pyqtSignal, QDateTime, QFontMetrics,
-    QDesktopServices, QFileDialog, QFileIconProvider, QSettings, QIcon,
+    QDesktopServices, QFileDialog, QFileIconProvider, QSettings, QIcon, QStringListModel,
     QApplication, QDialog, QUrl, QFont, QFontDatabase, QLocale, QFontInfo)
 
 from calibre import prints
-from calibre.constants import (islinux, iswindows, isbsd, isfrozen, isosx,
+from calibre.constants import (islinux, iswindows, isbsd, isfrozen, isosx, is_running_from_develop,
         plugins, config_dir, filesystem_encoding, isxp, DEBUG, __version__, __appname__ as APP_UID)
 from calibre.ptempfile import base_dir
 from calibre.utils.config import Config, ConfigProxy, dynamic, JSONConfig
@@ -30,7 +30,7 @@ except AttributeError:
 
 # Setup gprefs {{{
 gprefs = JSONConfig('gui')
-defs = gprefs.defaults
+
 
 native_menubar_defaults = {
     'action-layout-menubar': (
@@ -45,107 +45,121 @@ native_menubar_defaults = {
         )
 }
 
-if isosx:
-    defs['action-layout-menubar'] = native_menubar_defaults['action-layout-menubar']
-    defs['action-layout-menubar-device'] = native_menubar_defaults['action-layout-menubar-device']
-    defs['action-layout-toolbar'] = (
-        'Add Books', 'Edit Metadata', None, 'Convert Books', 'View', None,
-        'Choose Library', 'Donate', None, 'Fetch News', 'Store', 'Save To Disk',
-        'Connect Share', None, 'Remove Books', 'Tweak ePub'
-        )
-    defs['action-layout-toolbar-device'] = (
-        'Add Books', 'Edit Metadata', None, 'Convert Books', 'View',
-        'Send To Device', None, None, 'Location Manager', None, None,
-        'Fetch News', 'Store', 'Save To Disk', 'Connect Share', None,
-        'Remove Books',
-        )
-else:
-    defs['action-layout-menubar'] = ()
-    defs['action-layout-menubar-device'] = ()
-    defs['action-layout-toolbar'] = (
-        'Add Books', 'Edit Metadata', None, 'Convert Books', 'View', None,
-        'Store', 'Donate', 'Fetch News', 'Help', None,
-        'Remove Books', 'Choose Library', 'Save To Disk',
-        'Connect Share', 'Tweak ePub', 'Preferences',
-        )
-    defs['action-layout-toolbar-device'] = (
-        'Add Books', 'Edit Metadata', None, 'Convert Books', 'View',
-        'Send To Device', None, None, 'Location Manager', None, None,
-        'Fetch News', 'Save To Disk', 'Store', 'Connect Share', None,
-        'Remove Books', None, 'Help', 'Preferences',
-        )
 
-defs['action-layout-toolbar-child'] = ()
+def create_defs():
+    defs = gprefs.defaults
+    if isosx:
+        defs['action-layout-menubar'] = native_menubar_defaults['action-layout-menubar']
+        defs['action-layout-menubar-device'] = native_menubar_defaults['action-layout-menubar-device']
+        defs['action-layout-toolbar'] = (
+            'Add Books', 'Edit Metadata', None, 'Convert Books', 'View', None,
+            'Choose Library', 'Donate', None, 'Fetch News', 'Store', 'Save To Disk',
+            'Connect Share', None, 'Remove Books', 'Tweak ePub'
+            )
+        defs['action-layout-toolbar-device'] = (
+            'Add Books', 'Edit Metadata', None, 'Convert Books', 'View',
+            'Send To Device', None, None, 'Location Manager', None, None,
+            'Fetch News', 'Store', 'Save To Disk', 'Connect Share', None,
+            'Remove Books',
+            )
+    else:
+        defs['action-layout-menubar'] = ()
+        defs['action-layout-menubar-device'] = ()
+        defs['action-layout-toolbar'] = (
+            'Add Books', 'Edit Metadata', None, 'Convert Books', 'View', None,
+            'Store', 'Donate', 'Fetch News', 'Help', None,
+            'Remove Books', 'Choose Library', 'Save To Disk',
+            'Connect Share', 'Tweak ePub', 'Preferences',
+            )
+        defs['action-layout-toolbar-device'] = (
+            'Add Books', 'Edit Metadata', None, 'Convert Books', 'View',
+            'Send To Device', None, None, 'Location Manager', None, None,
+            'Fetch News', 'Save To Disk', 'Store', 'Connect Share', None,
+            'Remove Books', None, 'Help', 'Preferences',
+            )
 
-defs['action-layout-context-menu'] = (
-        'Edit Metadata', 'Send To Device', 'Save To Disk',
-        'Connect Share', 'Copy To Library', None,
-        'Convert Books', 'View', 'Open Folder', 'Show Book Details',
-        'Similar Books', 'Tweak ePub', None, 'Remove Books',
-        )
+    defs['action-layout-toolbar-child'] = ()
 
-defs['action-layout-context-menu-device'] = (
-        'View', 'Save To Disk', None, 'Remove Books', None,
-        'Add To Library', 'Edit Collections', 'Match Books'
-        )
+    defs['action-layout-context-menu'] = (
+            'Edit Metadata', 'Send To Device', 'Save To Disk',
+            'Connect Share', 'Copy To Library', None,
+            'Convert Books', 'View', 'Open Folder', 'Show Book Details',
+            'Similar Books', 'Tweak ePub', None, 'Remove Books',
+            )
 
-defs['action-layout-context-menu-cover-browser'] = (
-        'Edit Metadata', 'Send To Device', 'Save To Disk',
-        'Connect Share', 'Copy To Library', None,
-        'Convert Books', 'View', 'Open Folder', 'Show Book Details',
-        'Similar Books', 'Tweak ePub', None, 'Remove Books',
-        )
+    defs['action-layout-context-menu-device'] = (
+            'View', 'Save To Disk', None, 'Remove Books', None,
+            'Add To Library', 'Edit Collections', 'Match Books'
+            )
 
-defs['show_splash_screen'] = True
-defs['toolbar_icon_size'] = 'medium'
-defs['automerge'] = 'ignore'
-defs['toolbar_text'] = 'always'
-defs['font'] = None
-defs['tags_browser_partition_method'] = 'first letter'
-defs['tags_browser_collapse_at'] = 100
-defs['tag_browser_dont_collapse'] = []
-defs['edit_metadata_single_layout'] = 'default'
-defs['default_author_link'] = 'https://en.wikipedia.org/w/index.php?search={author}'
-defs['preserve_date_on_ctl'] = True
-defs['manual_add_auto_convert'] = False
-defs['auto_convert_same_fmt'] = False
-defs['cb_fullscreen'] = False
-defs['worker_max_time'] = 0
-defs['show_files_after_save'] = True
-defs['auto_add_path'] = None
-defs['auto_add_check_for_duplicates'] = False
-defs['blocked_auto_formats'] = []
-defs['auto_add_auto_convert'] = True
-defs['auto_add_everything'] = False
-defs['ui_style'] = 'calibre' if iswindows or isosx else 'system'
-defs['tag_browser_old_look'] = False
-defs['tag_browser_hide_empty_categories'] = False
-defs['book_list_tooltips'] = True
-defs['bd_show_cover'] = True
-defs['bd_overlay_cover_size'] = False
-defs['tags_browser_category_icons'] = {}
-defs['cover_browser_reflections'] = True
-defs['book_list_extra_row_spacing'] = 0
-defs['refresh_book_list_on_bulk_edit'] = True
-defs['cover_grid_width'] = 0
-defs['cover_grid_height'] = 0
-defs['cover_grid_spacing'] = 0
-defs['cover_grid_color'] = (80, 80, 80)
-defs['cover_grid_cache_size_multiple'] = 5
-defs['cover_grid_disk_cache_size'] = 2500
-defs['cover_grid_show_title'] = False
-defs['cover_grid_texture'] = None
-defs['show_vl_tabs'] = False
-defs['show_highlight_toggle_button'] = False
-defs['add_comments_to_email'] = False
-defs['cb_preserve_aspect_ratio'] = False
-defs['gpm_template_editor_font_size'] = 10
-defs['show_emblems'] = False
-defs['emblem_size'] = 32
-defs['emblem_position'] = 'left'
-defs['metadata_diff_mark_rejected'] = False
-defs['tag_browser_show_counts'] = True
-del defs
+    defs['action-layout-context-menu-cover-browser'] = (
+            'Edit Metadata', 'Send To Device', 'Save To Disk',
+            'Connect Share', 'Copy To Library', None,
+            'Convert Books', 'View', 'Open Folder', 'Show Book Details',
+            'Similar Books', 'Tweak ePub', None, 'Remove Books',
+            )
+
+    defs['show_splash_screen'] = True
+    defs['toolbar_icon_size'] = 'medium'
+    defs['automerge'] = 'ignore'
+    defs['toolbar_text'] = 'always'
+    defs['font'] = None
+    defs['tags_browser_partition_method'] = 'first letter'
+    defs['tags_browser_collapse_at'] = 100
+    defs['tag_browser_dont_collapse'] = []
+    defs['edit_metadata_single_layout'] = 'default'
+    defs['preserve_date_on_ctl'] = True
+    defs['manual_add_auto_convert'] = False
+    defs['auto_convert_same_fmt'] = False
+    defs['cb_fullscreen'] = False
+    defs['worker_max_time'] = 0
+    defs['show_files_after_save'] = True
+    defs['auto_add_path'] = None
+    defs['auto_add_check_for_duplicates'] = False
+    defs['blocked_auto_formats'] = []
+    defs['auto_add_auto_convert'] = True
+    defs['auto_add_everything'] = False
+    defs['ui_style'] = 'calibre' if iswindows or isosx else 'system'
+    defs['tag_browser_old_look'] = False
+    defs['tag_browser_hide_empty_categories'] = False
+    defs['book_list_tooltips'] = True
+    defs['show_layout_buttons'] = False
+    defs['bd_show_cover'] = True
+    defs['bd_overlay_cover_size'] = False
+    defs['tags_browser_category_icons'] = {}
+    defs['cover_browser_reflections'] = True
+    defs['book_list_extra_row_spacing'] = 0
+    defs['refresh_book_list_on_bulk_edit'] = True
+    defs['cover_grid_width'] = 0
+    defs['cover_grid_height'] = 0
+    defs['cover_grid_spacing'] = 0
+    defs['cover_grid_color'] = (80, 80, 80)
+    defs['cover_grid_cache_size_multiple'] = 5
+    defs['cover_grid_disk_cache_size'] = 2500
+    defs['cover_grid_show_title'] = False
+    defs['cover_grid_texture'] = None
+    defs['show_vl_tabs'] = False
+    defs['show_highlight_toggle_button'] = False
+    defs['add_comments_to_email'] = False
+    defs['cb_preserve_aspect_ratio'] = False
+    defs['gpm_template_editor_font_size'] = 10
+    defs['show_emblems'] = False
+    defs['emblem_size'] = 32
+    defs['emblem_position'] = 'left'
+    defs['metadata_diff_mark_rejected'] = False
+    defs['tag_browser_show_counts'] = True
+    defs['row_numbers_in_book_list'] = True
+    defs['hidpi'] = 'auto'
+    defs['tag_browser_item_padding'] = 0.5
+    defs['paste_isbn_prefixes'] = ['isbn', 'url', 'amazon', 'google']
+    defs['qv_respects_vls'] = True
+    defs['qv_dclick_changes_column'] = True
+    defs['qv_retkey_changes_column'] = True
+    defs['qv_follows_column'] = False
+
+
+create_defs()
+del create_defs
 # }}}
 
 UNDEFINED_QDATETIME = QDateTime(UNDEFINED_DATE)
@@ -175,14 +189,14 @@ def _config():  # {{{
     c.add_opt('LRF_conversion_defaults', default=[],
               help=_('Defaults for conversion to LRF'))
     c.add_opt('LRF_ebook_viewer_options', default=None,
-              help=_('Options for the LRF ebook viewer'))
+              help=_('Options for the LRF e-book viewer'))
     c.add_opt('internally_viewed_formats', default=['LRF', 'EPUB', 'LIT',
         'MOBI', 'PRC', 'POBI', 'AZW', 'AZW3', 'HTML', 'FB2', 'PDB', 'RB',
         'SNB', 'HTMLZ', 'KEPUB'], help=_(
             'Formats that are viewed using the internal viewer'))
     c.add_opt('column_map', default=ALL_COLUMNS,
               help=_('Columns to be displayed in the book list'))
-    c.add_opt('autolaunch_server', default=False, help=_('Automatically launch content server on application startup'))
+    c.add_opt('autolaunch_server', default=False, help=_('Automatically launch Content server on application startup'))
     c.add_opt('oldest_news', default=60, help=_('Oldest news kept in database'))
     c.add_opt('systray_icon', default=False, help=_('Show system tray icon'))
     c.add_opt('upload_news_to_device', default=True,
@@ -194,7 +208,7 @@ def _config():  # {{{
     c.add_opt('disable_tray_notification', default=False,
               help=_('Disable notifications from the system tray icon'))
     c.add_opt('default_send_to_device_action', default=None,
-            help=_('Default action to perform when send to device button is '
+            help=_('Default action to perform when the "Send to device" button is '
                 'clicked'))
     c.add_opt('asked_library_thing_password', default=False,
             help='Asked library thing password at least once.')
@@ -212,9 +226,9 @@ def _config():  # {{{
     c.add_opt('main_search_history', default=[],
         help='Search history for the main GUI')
     c.add_opt('viewer_search_history', default=[],
-        help='Search history for the ebook viewer')
+        help='Search history for the e-book viewer')
     c.add_opt('viewer_toc_search_history', default=[],
-        help='Search history for the ToC in the ebook viewer')
+        help='Search history for the ToC in the e-book viewer')
     c.add_opt('lrf_viewer_search_history', default=[],
         help='Search history for the LRF viewer')
     c.add_opt('scheduler_search_history', default=[],
@@ -241,10 +255,10 @@ def _config():  # {{{
             help=_('Limit max simultaneous jobs to number of CPUs'))
     c.add_opt('gui_layout', choices=['wide', 'narrow'],
             help=_('The layout of the user interface. Wide has the '
-                'book details panel on the right and narrow has '
+                'Book details panel on the right and narrow has '
                 'it at the bottom.'), default='wide')
     c.add_opt('show_avg_rating', default=True,
-            help=_('Show the average rating per item indication in the tag browser'))
+            help=_('Show the average rating per item indication in the Tag browser'))
     c.add_opt('disable_animations', default=False,
             help=_('Disable UI animations'))
 
@@ -256,12 +270,23 @@ def _config():  # {{{
     c.add_opt
     return ConfigProxy(c)
 
+
 config = _config()
+
 # }}}
 
 QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, config_dir)
 QSettings.setPath(QSettings.IniFormat, QSettings.SystemScope, config_dir)
 QSettings.setDefaultFormat(QSettings.IniFormat)
+
+
+def default_author_link():
+    from calibre.ebooks.metadata.book.render import DEFAULT_AUTHOR_LINK
+    ans = gprefs.get('default_author_link')
+    if ans == 'https://en.wikipedia.org/w/index.php?search={author}':
+        # The old default value for this setting
+        ans = DEFAULT_AUTHOR_LINK
+    return ans or DEFAULT_AUTHOR_LINK
 
 
 def available_heights():
@@ -287,18 +312,10 @@ def available_width():
     return desktop.availableGeometry().width()
 
 
-def get_windows_color_depth():
-    import win32gui, win32con, win32print
-    hwin = win32gui.GetDesktopWindow()
-    hwindc = win32gui.GetWindowDC(hwin)
-    ans = win32print.GetDeviceCaps(hwindc, win32con.BITSPIXEL)
-    win32gui.ReleaseDC(hwin, hwindc)
-    return ans
-
-
 def get_screen_dpi():
     d = QApplication.desktop()
     return (d.logicalDpiX(), d.logicalDpiY())
+
 
 _is_widescreen = None
 
@@ -393,7 +410,7 @@ def info_dialog(parent, title, msg, det_msg='', show=False,
 def show_restart_warning(msg, parent=None):
     d = warning_dialog(parent, _('Restart needed'), msg,
             show_copy_button=False)
-    b = d.bb.addButton(_('Restart calibre now'), d.bb.AcceptRole)
+    b = d.bb.addButton(_('&Restart calibre now'), d.bb.AcceptRole)
     b.setIcon(QIcon(I('lt.png')))
     d.do_restart = False
 
@@ -580,6 +597,7 @@ class FileIconProvider(QFileIconProvider):
             return self.icons['default']
         return QFileIconProvider.icon(self, arg)
 
+
 _file_icon_provider = None
 
 
@@ -706,6 +724,7 @@ class FileDialog(QObject):
             return tuple(os.path.abspath(unicode(i)) for i in self.fd.selectedFiles())
         return tuple(self.selected_files)
 
+
 has_windows_file_dialog_helper = False
 if iswindows and 'CALIBRE_NO_NATIVE_FILEDIALOGS' not in os.environ:
     from calibre.gui2.win_file_dialogs import is_ok as has_windows_file_dialog_helper
@@ -797,10 +816,19 @@ def choose_osx_app(window, name, title, default_dir='/Applications'):
         return app
 
 
-def pixmap_to_data(pixmap, format='JPEG', quality=90):
+def pixmap_to_data(pixmap, format='JPEG', quality=None):
     '''
     Return the QPixmap pixmap as a string saved in the specified format.
     '''
+    if quality is None:
+        if format.upper() == "PNG":
+            # For some reason on windows with Qt 5.6 using a quality of 90
+            # generates invalid PNG data. Many other quality values work
+            # but we use -1 for the default quality which is most likely to
+            # work
+            quality = -1
+        else:
+            quality = 90
     ba = QByteArray()
     buf = QBuffer(ba)
     buf.open(QBuffer.WriteOnly)
@@ -813,6 +841,7 @@ def decouple(prefix):
     dynamic.decouple(prefix)
     from calibre.gui2.widgets import history
     history.decouple(prefix)
+
 
 _gui_prefs = gprefs
 
@@ -890,7 +919,7 @@ def load_builtin_fonts():
 def setup_gui_option_parser(parser):
     if islinux:
         parser.add_option('--detach', default=False, action='store_true',
-                          help=_('Detach from the controlling terminal, if any (linux only)'))
+                          help=_('Detach from the controlling terminal, if any (Linux only)'))
 
 
 def show_temp_dir_error(err):
@@ -900,6 +929,29 @@ def show_temp_dir_error(err):
         extra = _('The %s environment variable is set. Try unsetting it.') % 'CALIBRE_TEMP_DIR'
     error_dialog(None, _('Could not create temporary directory'), _(
         'Could not create temporary directory, calibre cannot start.') + ' ' + extra, det_msg=traceback.format_exc(), show=True)
+
+
+def setup_hidpi():
+    # This requires Qt >= 5.6
+    has_env_setting = False
+    env_vars = ('QT_AUTO_SCREEN_SCALE_FACTOR', 'QT_SCALE_FACTOR', 'QT_SCREEN_SCALE_FACTORS', 'QT_DEVICE_PIXEL_RATIO')
+    for v in env_vars:
+        if os.environ.get(v):
+            has_env_setting = True
+            break
+    hidpi = gprefs['hidpi']
+    if hidpi == 'on' or (hidpi == 'auto' and not has_env_setting):
+        if DEBUG:
+            prints('Turning on automatic hidpi scaling')
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    elif hidpi == 'off':
+        if DEBUG:
+            prints('Turning off automatic hidpi scaling')
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, False)
+        for p in env_vars:
+            os.environ.pop(p, None)
+    elif DEBUG:
+        prints('Not controlling automatic hidpi scaling')
 
 
 class Application(QApplication):
@@ -917,17 +969,9 @@ class Application(QApplication):
         self.headless = headless
         qargs = [i.encode('utf-8') if isinstance(i, unicode) else i for i in args]
         self.pi = plugins['progress_indicator'][0]
-        if not isosx and not headless and hasattr(Qt, 'AA_EnableHighDpiScaling'):
+        if not isosx and not headless:
             # On OS X high dpi scaling is turned on automatically by the OS, so we dont need to set it explicitly
-            # This requires Qt >= 5.6
-            for v in ('QT_AUTO_SCREEN_SCALE_FACTOR', 'QT_SCALE_FACTOR', 'QT_SCREEN_SCALE_FACTORS', 'QT_DEVICE_PIXEL_RATIO'):
-                if os.environ.get(v):
-                    break
-            else:
-                # Should probably make a preference to allow the user to
-                # control this, if needed.
-                # Could have options: auto, off, 1.25, 1.5, 1.75, 2, 2.25, 2.5
-                QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+            setup_hidpi()
         QApplication.setOrganizationName('calibre-ebook.com')
         QApplication.setOrganizationDomain(QApplication.organizationName())
         QApplication.setApplicationVersion(__version__)
@@ -951,12 +995,7 @@ class Application(QApplication):
         if islinux or isbsd:
             self.setAttribute(Qt.AA_DontUseNativeMenuBar, 'CALIBRE_NO_NATIVE_MENUBAR' in os.environ)
         self.setup_styles(force_calibre_style)
-        f = QFont(QApplication.font())
-        if (f.family(), f.pointSize()) == ('Sans Serif', 9):  # Hard coded Qt settings, no user preference detected
-            f.setPointSize(10)
-            QApplication.setFont(f)
-        f = QFontInfo(f)
-        self.original_font = (f.family(), f.pointSize(), f.weight(), f.italic(), 100)
+        self.setup_ui_font()
         if not self.using_calibre_style and self.style().objectName() == 'fusion':
             # Since Qt is using the fusion style anyway, specialize it
             self.load_calibre_style()
@@ -1008,11 +1047,28 @@ class Application(QApplication):
             # Qt 5 bug: https://bugreports.qt-project.org/browse/QTBUG-41125
             self.aboutToQuit.connect(self.flush_clipboard)
 
+    def setup_ui_font(self):
+        f = QFont(QApplication.font())
+        q = (f.family(), f.pointSize())
+        if iswindows:
+            if q == ('MS Shell Dlg 2', 8):  # Qt default setting
+                # Microsoft recommends the default font be Segoe UI at 9 pt
+                # https://msdn.microsoft.com/en-us/library/windows/desktop/dn742483(v=vs.85).aspx
+                f.setFamily('Segoe UI')
+                f.setPointSize(9)
+                QApplication.setFont(f)
+        else:
+            if q == ('Sans Serif', 9):  # Hard coded Qt settings, no user preference detected
+                f.setPointSize(10)
+                QApplication.setFont(f)
+        f = QFontInfo(f)
+        self.original_font = (f.family(), f.pointSize(), f.weight(), f.italic(), 100)
+
     def flush_clipboard(self):
         try:
             if self.clipboard().ownsClipboard():
                 import ctypes
-                ctypes.WinDLL('ole32.dll').OleFlushClipboard()
+                ctypes.WinDLL(b'ole32.dll').OleFlushClipboard()
         except Exception:
             import traceback
             traceback.print_exc()
@@ -1026,20 +1082,15 @@ class Application(QApplication):
         load_builtin_fonts()
 
     def setup_styles(self, force_calibre_style):
-        depth_ok = True
-        if iswindows:
-            # There are some people that still run 16 bit winxp installs. The
-            # new style does not render well on 16bit machines.
-            try:
-                depth_ok = get_windows_color_depth() >= 32
-            except:
-                import traceback
-                traceback.print_exc()
-            if not depth_ok:
-                prints('Color depth is less than 32 bits disabling modern look')
-
-        self.using_calibre_style = force_calibre_style or 'CALIBRE_IGNORE_SYSTEM_THEME' in os.environ or (
-            depth_ok and gprefs['ui_style'] != 'system')
+        if iswindows or isosx:
+            using_calibre_style = gprefs['ui_style'] != 'system'
+        else:
+            using_calibre_style = 'CALIBRE_USE_SYSTEM_THEME' not in os.environ
+        if force_calibre_style:
+            using_calibre_style = True
+        self.using_calibre_style = using_calibre_style
+        if DEBUG:
+            prints('Using calibre Qt style:', self.using_calibre_style)
         if self.using_calibre_style:
             self.load_calibre_style()
 
@@ -1149,6 +1200,7 @@ class Application(QApplication):
             return
         self.shutdown_signal_received.emit()
 
+
 _store_app = None
 
 
@@ -1188,6 +1240,8 @@ def sanitize_env_vars():
                     os.environ[var] = orig
                 elif var in os.environ:
                     del os.environ[var]
+
+
 SanitizeLibraryPath = sanitize_env_vars  # For old plugins
 
 
@@ -1223,6 +1277,7 @@ def open_local_file(path):
         url = QUrl.fromLocalFile(path)
         open_url(url)
 
+
 _ea_lock = Lock()
 
 
@@ -1231,10 +1286,11 @@ def ensure_app(headless=True):
     with _ea_lock:
         if _store_app is None and QApplication.instance() is None:
             args = sys.argv[:1]
-            if headless and (islinux or isbsd):
+            has_headless = isosx or islinux or isbsd
+            if headless and has_headless:
                 args += ['-platformpluginpath', sys.extensions_location, '-platform', 'headless']
             _store_app = QApplication(args)
-            if headless and (islinux or isbsd):
+            if headless and has_headless:
                 _store_app.headless = True
             import traceback
             # This is needed because as of PyQt 5.4 if sys.execpthook ==
@@ -1283,6 +1339,7 @@ def is_ok_to_use_qt():
 def is_gui_thread():
     global gui_thread
     return gui_thread is QThread.currentThread()
+
 
 _rating_font = 'Arial Unicode MS' if iswindows else 'sans-serif'
 
@@ -1370,9 +1427,9 @@ def build_forms(srcdir, info=None, summary=False, check_for_migration=False):
     if force_compile:
         gprefs.set('migrated_forms_to_qt5', True)
 
-_df = os.environ.get('CALIBRE_DEVELOP_FROM', None)
-if _df and os.path.exists(_df):
-    build_forms(_df, check_for_migration=True)
+
+if is_running_from_develop:
+    build_forms(os.environ['CALIBRE_DEVELOP_FROM'], check_for_migration=True)
 
 
 def event_type_name(ev_or_etype):
@@ -1382,3 +1439,24 @@ def event_type_name(ev_or_etype):
         if num == etype:
             return name
     return 'UnknownEventType'
+
+
+def secure_web_page(qwebpage_or_qwebsettings):
+    from PyQt5.QtWebKit import QWebSettings
+    settings = qwebpage_or_qwebsettings if isinstance(qwebpage_or_qwebsettings, QWebSettings) else qwebpage_or_qwebsettings.settings()
+    settings.setAttribute(QWebSettings.JavaEnabled, False)
+    settings.setAttribute(QWebSettings.PluginsEnabled, False)
+    settings.setAttribute(QWebSettings.JavascriptCanOpenWindows, False)
+    settings.setAttribute(QWebSettings.JavascriptCanAccessClipboard, False)
+    settings.setAttribute(QWebSettings.LocalContentCanAccessFileUrls, False)  # ensure javascript cannot read from local files
+    settings.setAttribute(QWebSettings.NotificationsEnabled, False)
+    settings.setThirdPartyCookiePolicy(QWebSettings.AlwaysBlockThirdPartyCookies)
+    settings.setAttribute(QWebSettings.OfflineStorageDatabaseEnabled, False)
+    settings.setAttribute(QWebSettings.LocalStorageEnabled, False)
+    QWebSettings.setOfflineStorageDefaultQuota(0)
+    QWebSettings.setOfflineStoragePath(None)
+    return settings
+
+
+empty_model = QStringListModel([''])
+empty_index = empty_model.index(0)

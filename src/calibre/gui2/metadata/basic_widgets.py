@@ -25,7 +25,7 @@ from calibre.ebooks.metadata import (
     title_sort, string_to_authors, check_isbn, authors_to_sort_string)
 from calibre.ebooks.metadata.meta import get_metadata
 from calibre.gui2 import (file_icon_provider, UNDEFINED_QDATETIME,
-        choose_files, error_dialog, choose_images)
+        choose_files, error_dialog, choose_images, gprefs)
 from calibre.gui2.complete2 import EditWithComplete
 from calibre.utils.date import (
     local_tz, qt_to_dt, as_local_time, UNDEFINED_DATE, is_date_undefined,
@@ -56,6 +56,7 @@ def save_dialog(parent, title, msg, det_msg=''):
 
 def clean_text(x):
     return re.sub(r'\s', ' ', x.strip())
+
 
 '''
 The interface common to all widgets used to set basic metadata
@@ -1050,7 +1051,7 @@ class Cover(ImageView):  # {{{
                     self.clicked.connect(action)
 
         self.select_cover_button = CB(_('&Browse'), 'document_open.png', self.select_cover)
-        self.trim_cover_button = b = CB(_('T&rim borders'), 'trim.png')
+        self.trim_cover_button = b = CB(_('Trim bord&ers'), 'trim.png')
         b.setToolTip(_(
             'Automatically detect and remove extra space at the cover\'s edges.\n'
             'Pressing it repeatedly can sometimes remove stubborn borders.'))
@@ -1448,7 +1449,7 @@ class Identifiers(Dialog):
 
 
 class IdentifiersEdit(QLineEdit, ToMetadataMixin):
-    LABEL = _('I&ds:')
+    LABEL = _('&Ids:')
     BASE_TT = _('Edit the identifiers for this book. '
             'For example: \n\n%s')%(
             'isbn:1565927249, doi:10.1000/182, amazon:1565927249')
@@ -1528,12 +1529,29 @@ class IdentifiersEdit(QLineEdit, ToMetadataMixin):
             col = 'none'
         elif check_isbn(isbn) is not None:
             col = OK_COLOR
-            extra = '\n\n'+_('This ISBN number is valid')
+            extra = '\n\n'+_('This ISBN is valid')
         else:
             col = ERR_COLOR
-            extra = '\n\n' + _('This ISBN number is invalid')
+            extra = '\n\n' + _('This ISBN is invalid')
         self.setToolTip(tt+extra)
         self.setStyleSheet(INDICATOR_SHEET % col)
+
+    def paste_identifier(self):
+        try:
+            prefix = gprefs['paste_isbn_prefixes'][0]
+        except IndexError:
+            prefix = 'isbn'
+        self.paste_prefix(prefix)
+
+    def paste_prefix(self, prefix):
+        if prefix == 'isbn':
+            self.paste_isbn()
+        else:
+            text = unicode(QApplication.clipboard().text()).strip()
+            if text:
+                vals = self.current_val
+                vals[prefix] = text
+                self.current_val = vals
 
     def paste_isbn(self):
         text = unicode(QApplication.clipboard().text()).strip()
@@ -1593,10 +1611,10 @@ class ISBNDialog(QDialog):  # {{{
             extra = ''
         elif check_isbn(isbn) is not None:
             col = OK_COLOR
-            extra = _('This ISBN number is valid')
+            extra = _('This ISBN is valid')
         else:
             col = ERR_COLOR
-            extra = _('This ISBN number is invalid')
+            extra = _('This ISBN is invalid')
         self.line_edit.setToolTip(extra)
         self.line_edit.setStyleSheet(INDICATOR_SHEET % col)
 
@@ -1731,12 +1749,16 @@ class DateEdit(make_undoable(QDateTimeEdit), ToMetadataMixin):
         elif ev.key() == Qt.Key_Equal:
             ev.accept()
             self.setDateTime(QDateTime.currentDateTime())
+        elif ev.key() == Qt.Key_Up and is_date_undefined(self.current_val):
+            self.setDateTime(QDateTime.currentDateTime())
+        elif ev.key() == Qt.Key_Tab and is_date_undefined(self.current_val):
+            ev.ignore()
         else:
             return super(DateEdit, self).keyPressEvent(ev)
 
 
 class PubdateEdit(DateEdit):
-    LABEL = _('Publishe&d:')
+    LABEL = _('P&ublished:')
     FMT = 'MMM yyyy'
     ATTR = FIELD_NAME = 'pubdate'
     TWEAK = 'gui_pubdate_display_format'

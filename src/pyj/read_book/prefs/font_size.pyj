@@ -6,7 +6,7 @@ from dom import unique_id, set_css, add_extra_css, rule, element
 from elementmaker import E
 from gettext import gettext as _
 from widgets import create_button
-from book_list.globals import get_session_data, get_boss
+from book_list.globals import get_session_data, get_read_ui
 from book_list.theme import get_color
 
 CONTAINER = unique_id('font-size-prefs')
@@ -15,7 +15,7 @@ QUICK = unique_id('quick')
 add_extra_css(def():
     style = rule(QUICK, 'li.current', background_color=get_color('window-background2'))
     style += rule(QUICK, 'li:hover', background_color=get_color('window-background2'))
-    style += rule(CONTAINER, 'a:hover', color='red')
+    style += rule(CONTAINER, 'a:hover', color=get_color('window-hover-foreground'))
     return style
 )
 
@@ -23,7 +23,7 @@ def change_font_size(sz):
     sd = get_session_data()
     if sd.get('base_font_size') is not sz:
         sd.set('base_font_size', sz)
-        get_boss().read_ui.update_font_size()
+        get_read_ui().update_font_size()
 
 def set_quick_size(ev):
     li = ev.currentTarget

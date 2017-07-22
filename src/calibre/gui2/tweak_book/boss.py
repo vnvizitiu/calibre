@@ -6,7 +6,7 @@ from __future__ import (unicode_literals, division, absolute_import,
 __license__ = 'GPL v3'
 __copyright__ = '2013, Kovid Goyal <kovid at kovidgoyal.net>'
 
-import tempfile, shutil, sys, os
+import tempfile, shutil, sys, os, errno
 from functools import partial, wraps
 from urlparse import urlparse
 
@@ -15,7 +15,7 @@ from PyQt5.Qt import (
     QDialogButtonBox, QIcon, QInputDialog, QUrl, pyqtSignal)
 
 from calibre import prints, isbytestring
-from calibre.constants import cache_dir
+from calibre.constants import cache_dir, iswindows
 from calibre.ptempfile import PersistentTemporaryDirectory, TemporaryDirectory
 from calibre.ebooks.oeb.base import urlnormalize
 from calibre.ebooks.oeb.polish.main import SUPPORTED, tweak_polish
@@ -48,6 +48,7 @@ from calibre.gui2.tweak_book.widgets import (
     InsertSemantics, BusyCursor, InsertTag, FilterCSS, AddCover)
 from calibre.utils.config import JSONConfig
 from calibre.utils.icu import numeric_sort_key
+from calibre.utils.imghdr import identify
 
 _diff_dialogs = []
 last_used_transform_rules = []
@@ -70,11 +71,9 @@ def in_thread_job(func):
             return func(*args, **kwargs)
     return ans
 
-_boss = None
-
 
 def get_boss():
-    return _boss
+    return get_boss.boss
 
 
 class Boss(QObject):
@@ -82,7 +81,6 @@ class Boss(QObject):
     handle_completion_result_signal = pyqtSignal(object)
 
     def __init__(self, parent, notify=None):
-        global _boss
         QObject.__init__(self, parent)
         self.global_undo = GlobalUndoHistory()
         self.container_count = 0
@@ -93,7 +91,7 @@ class Boss(QObject):
         self.doing_terminal_save = False
         self.ignore_preview_to_editor_sync = False
         setup_cssutils_serialization()
-        _boss = self
+        get_boss.boss = self
         self.gui = parent
         completion_worker().result_callback = self.handle_completion_result_signal.emit
         self.handle_completion_result_signal.connect(self.handle_completion_result, Qt.QueuedConnection)
@@ -254,7 +252,7 @@ class Boss(QObject):
 
     def open_book(self, path=None, edit_file=None, clear_notify_data=True, open_folder=False):
         '''
-        Open the ebook at ``path`` for editing. Will show an error if the ebook is not in a supported format or the current book has unsaved changes.
+        Open the e-book at ``path`` for editing. Will show an error if the e-book is not in a supported format or the current book has unsaved changes.
 
         :param edit_file: The name of a file inside the newly opened book to start editing. Can also be a list of names.
         '''
@@ -318,7 +316,7 @@ class Boss(QObject):
                     ' Do an EPUB to EPUB conversion before trying to edit this book.'), show=True)
 
             return error_dialog(self.gui, _('Failed to open book'),
-                    _('Failed to open book, click Show details for more information.'),
+                    _('Failed to open book, click "Show details" for more information.'),
                                 det_msg=job.traceback, show=True)
         if cn:
             self.save_manager.clear_notify_data()
@@ -345,6 +343,13 @@ class Boss(QObject):
             recent_books.insert(0, path)
             tprefs['recent-books'] = recent_books[:10]
             self.gui.update_recent_books()
+            if iswindows:
+                try:
+                    from win32com.shell import shell, shellcon
+                    shell.SHAddToRecentDocs(shellcon.SHARD_PATHW, path)
+                except Exception:
+                    import traceback
+                    traceback.print_exc()
             if ef:
                 if isinstance(ef, type('')):
                     ef = [ef]
@@ -435,14 +440,17 @@ class Boss(QObject):
         d = NewFileDialog(self.gui)
         if d.exec_() != d.Accepted:
             return
-        self.do_add_file(d.file_name, d.file_data, using_template=d.using_template, edit_file=True)
+        added_name = self.do_add_file(d.file_name, d.file_data, using_template=d.using_template, edit_file=True)
+        if d.file_name.rpartition('.')[2].lower() in ('ttf', 'otf', 'woff'):
+            from calibre.gui2.tweak_book.manage_fonts import show_font_face_rule_for_font_file
+            show_font_face_rule_for_font_file(d.file_data, added_name, self.gui)
 
     def do_add_file(self, file_name, data, using_template=False, edit_file=False):
         self.add_savepoint(_('Before: Add file %s') % self.gui.elided_text(file_name))
         c = current_container()
         adata = data.replace(b'%CURSOR%', b'') if using_template else data
         try:
-            c.add_file(file_name, adata)
+            added_name = c.add_file(file_name, adata)
         except:
             self.rewind_savepoint()
             raise
@@ -459,6 +467,7 @@ class Boss(QObject):
                 self.edit_file(file_name, syntax)
         self.set_modified()
         completion_worker().clear_caches('names')
+        return added_name
 
     def add_files(self):
         if not self.ensure_book(_('You must first open a book to tweak, before trying to create new files in it.')):
@@ -474,7 +483,7 @@ class Boss(QObject):
             for path in sorted(files, key=numeric_sort_key):
                 name = files[path]
                 i = 0
-                while c.exists(name) or c.manifest_has_name(name):
+                while c.exists(name) or c.manifest_has_name(name) or c.has_name_case_insensitive(name):
                     i += 1
                     name, ext = name.rpartition('.')[0::2]
                     name = '%s_%d.%s' % (name, i, ext)
@@ -588,7 +597,7 @@ class Boss(QObject):
             return
         from calibre.gui2.tweak_book.download import DownloadResources
         with BusyCursor():
-            self.add_savepoint(_('Before get external resources'))
+            self.add_savepoint(_('Before: Get external resources'))
         try:
             d = DownloadResources(self.gui)
             d.exec_()
@@ -627,8 +636,11 @@ class Boss(QObject):
         self.commit_all_editors_to_container()
         name_map = rationalize_folders(c, d.folder_map)
         if not name_map:
-            return info_dialog(self.gui, _('Nothing to do'), _(
-                'The files in this book are already arranged into folders'), show=True)
+            confirm(_(
+                'The files in this book are already arranged into folders'), 'already-arranged-into-folders',
+                self.gui, pixmap='dialog_information.png', title=_('Nothing to do'), show_cancel_button=False,
+                config_set=tprefs, confirm_msg=_('Show this message &again'))
+            return
         self.add_savepoint(_('Before: Arrange into folders'))
         self.gui.blocking_job(
             'rationalize_folders', _('Renaming and updating links...'), partial(self.rename_done, name_map),
@@ -649,23 +661,23 @@ class Boss(QObject):
                 _('The name you have chosen {0} contains special characters, internally'
                   ' it will look like: {1}Try to use only the English alphabet [a-z], numbers [0-9],'
                   ' hyphens and underscores for file names. Other characters can cause problems for '
-                  ' different ebook viewers. Are you sure you want to proceed?').format(
+                  ' different e-book viewers. Are you sure you want to proceed?').format(
                       '<pre>%s</pre>'%newname, '<pre>%s</pre>' % urlnormalize(newname)),
                 'confirm-urlunsafe-change', parent=self.gui, title=_('Are you sure?'), config_set=tprefs):
-                    return
+                return
         self.add_savepoint(_('Before: Rename %s') % oldname)
         name_map = {oldname:newname}
         self.gui.blocking_job(
-            'rename_file', _('Renaming and updating links...'), partial(self.rename_done, name_map),
+            'rename_file', _('Renaming and updating links...'), partial(self.rename_done, name_map, from_filelist=self.gui.file_list.current_name),
             rename_files, current_container(), name_map)
 
     def bulk_rename_requested(self, name_map):
         self.add_savepoint(_('Before: Bulk rename'))
         self.gui.blocking_job(
-            'bulk_rename_files', _('Renaming and updating links...'), partial(self.rename_done, name_map),
+            'bulk_rename_files', _('Renaming and updating links...'), partial(self.rename_done, name_map, from_filelist=self.gui.file_list.current_name),
             rename_files, current_container(), name_map)
 
-    def rename_done(self, name_map, job):
+    def rename_done(self, name_map, job, from_filelist=None):
         if job.traceback is not None:
             return error_dialog(self.gui, _('Failed to rename files'),
                     _('Failed to rename files, click Show details for more information.'),
@@ -680,6 +692,10 @@ class Boss(QObject):
             if self.gui.preview.current_name == oldname:
                 self.gui.preview.current_name = newname
         self.apply_container_update_to_gui()
+        if from_filelist:
+            self.gui.file_list.select_names(frozenset(name_map.itervalues()), current_name=name_map.get(from_filelist))
+            self.gui.file_list.file_list.setFocus(Qt.PopupFocusReason)
+
     # }}}
 
     # Global history {{{
@@ -846,7 +862,8 @@ class Boss(QObject):
                         self.refresh_file_list()
                         chosen_name = chosen_image_is_external[0]
                     href = current_container().name_to_href(chosen_name, edname)
-                    ed.insert_image(href, fullpage=fullpage, preserve_aspect_ratio=preserve_ar)
+                    fmt, width, height = identify(current_container().raw_data(chosen_name, decode=False))
+                    ed.insert_image(href, fullpage=fullpage, preserve_aspect_ratio=preserve_ar, width=width, height=height)
             elif action[0] == 'insert_hyperlink':
                 self.commit_all_editors_to_container()
                 d = InsertLink(current_container(), edname, initial_text=ed.get_smart_selection(), parent=self.gui)
@@ -1124,9 +1141,9 @@ class Boss(QObject):
             self.abort_terminal_save()
         self.set_modified()
         error_dialog(self.gui, _('Could not save'),
-                     _('Saving of the book failed. Click "Show Details"'
+                     _('Saving of the book failed. Click "Show details"'
                        ' for more information. You can try to save a copy'
-                       ' to a different location, via File->Save a Copy'), det_msg=tb, show=True)
+                       ' to a different location, via File->Save a copy'), det_msg=tb, show=True)
 
     def go_to_line_number(self):
         ed = self.gui.central.current_editor
@@ -1266,7 +1283,20 @@ class Boss(QObject):
             self.set_modified()
 
     @in_thread_job
-    def export_requested(self, name, path):
+    def export_requested(self, name_or_names, path):
+        if isinstance(name_or_names, basestring):
+            return self.export_file(name_or_names, path)
+        for name in name_or_names:
+            dest = os.path.abspath(os.path.join(path, name))
+            if '/' in name or os.sep in name:
+                try:
+                    os.makedirs(os.path.dirname(dest))
+                except EnvironmentError as err:
+                    if err.errno != errno.EEXIST:
+                        raise
+            self.export_file(name, dest)
+
+    def export_file(self, name, path):
         if name in editors and not editors[name].is_synced_to_container:
             self.commit_editor_to_container(name)
         with current_container().open(name, 'rb') as src, open(path, 'wb') as dest:

@@ -12,14 +12,10 @@ from unittest import skipIf
 from glob import glob
 from threading import Event
 
-try:
-    from calibre.utils.certgen import create_server_cert
-except ImportError:
-    create_server_cert = None
-
 from calibre.srv.pre_activated import has_preactivated_support
 from calibre.srv.tests.base import BaseTest, TestServer
 from calibre.ptempfile import TemporaryDirectory
+from calibre.utils.certgen import create_server_cert
 from calibre.utils.monotonic import monotonic
 is_ci = os.environ.get('CI', '').lower() == 'true'
 
@@ -87,13 +83,18 @@ class LoopTest(BaseTest):
             server.join()
             self.ae(0, sum(int(w.is_alive()) for w in server.loop.pool.workers))
         # Test shutdown with hung worker
-        with TestServer(lambda data:time.sleep(1000), worker_count=3, shutdown_timeout=0.01, timeout=0.01) as server:
+        block = Event()
+        with TestServer(lambda data:block.wait(), worker_count=3, shutdown_timeout=0.01, timeout=0.01) as server:
             pool = server.loop.pool
             self.ae(3, sum(int(w.is_alive()) for w in pool.workers))
             conn = server.connect()
             conn.request('GET', '/')
             with self.assertRaises(socket.timeout):
-                conn.getresponse()
+                res = conn.getresponse()
+                if str(res.status) == str(httplib.REQUEST_TIMEOUT):
+                    raise socket.timeout('Timeout')
+                raise Exception('Got unexpected response: code: %s %s headers: %r data: %r' % (
+                    res.status, res.reason, res.getheaders(), res.read()))
             self.ae(pool.busy, 1)
             server.loop.log.filter_level = server.loop.log.ERROR
             server.loop.stop()
@@ -182,7 +183,6 @@ class LoopTest(BaseTest):
         set(b'123456\n7', 4, 2, READ)
         self.ae(buf.readline(), b'56\n')
 
-    @skipIf(create_server_cert is None, 'certgen module not available')
     def test_ssl(self):
         'Test serving over SSL'
         address = '127.0.0.1'

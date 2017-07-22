@@ -21,7 +21,7 @@ from calibre.gui2.library.delegates import (RatingDelegate, PubDateDelegate,
     CcBoolDelegate, CcCommentsDelegate, CcDateDelegate, CcTemplateDelegate,
     CcEnumDelegate, CcNumberDelegate, LanguagesDelegate)
 from calibre.gui2.library.models import BooksModel, DeviceBooksModel
-from calibre.gui2.library.alternate_views import AlternateViews, setup_dnd_interface
+from calibre.gui2.library.alternate_views import AlternateViews, setup_dnd_interface, setup_gestures, gesture_viewport_event
 from calibre.utils.config import tweaks, prefs
 from calibre.gui2 import error_dialog, gprefs, FunctionDispatcher
 from calibre.gui2.library import DEFAULT_SORT
@@ -193,10 +193,14 @@ class BooksView(QTableView):  # {{{
     def viewportEvent(self, event):
         if (event.type() == event.ToolTip and not gprefs['book_list_tooltips']):
             return False
+        ret = gesture_viewport_event(self, event)
+        if ret is not None:
+            return ret
         return QTableView.viewportEvent(self, event)
 
     def __init__(self, parent, modelcls=BooksModel, use_edit_metadata_dialog=True):
         QTableView.__init__(self, parent)
+        setup_gestures(self)
         self.default_row_height = self.verticalHeader().defaultSectionSize()
         self.gui = parent
         self.setProperty('highlight_current_item', 150)
@@ -284,6 +288,7 @@ class BooksView(QTableView):  # {{{
         self._model.about_to_be_sorted.connect(self.about_to_be_sorted)
         self._model.sorting_done.connect(self.sorting_done,
                 type=Qt.QueuedConnection)
+        self.set_row_header_visibility()
 
     # Column Header Context Menu {{{
     def column_header_context_handler(self, action=None, column=None):
@@ -317,15 +322,15 @@ class BooksView(QTableView):  # {{{
             alignment = action.partition('_')[-1]
             self._model.change_alignment(column, alignment)
         elif action == 'quickview':
-            from calibre.customize.ui import find_plugin
-            qv = find_plugin('Show Quickview')
+            from calibre.gui2.actions.show_quickview import get_quickview_action_plugin
+            qv = get_quickview_action_plugin()
             if qv:
                 rows = self.selectionModel().selectedRows()
                 if len(rows) > 0:
                     current_row = rows[0].row()
                     current_col = self.column_map.index(column)
                     index = self.model().index(current_row, current_col)
-                    qv.actual_plugin_.change_quickview_column(index)
+                    qv.change_quickview_column(index)
 
         self.save_state()
 
@@ -762,6 +767,11 @@ class BooksView(QTableView):  # {{{
             self.model().set_row_decoration(current_marked)
             self.row_header.headerDataChanged(Qt.Vertical, 0, self.row_header.count()-1)
             self.row_header.geometriesChanged.emit()
+            self.set_row_header_visibility()
+
+    def set_row_header_visibility(self):
+        visible = self.model().row_decoration is not None or gprefs['row_numbers_in_book_list']
+        self.row_header.setVisible(visible)
 
     def database_changed(self, db):
         db.data.add_marked_listener(self.marked_changed_listener)
@@ -834,10 +844,6 @@ class BooksView(QTableView):  # {{{
 
     def contextMenuEvent(self, event):
         from calibre.gui2.main_window import clone_menu
-        sac = self.gui.iactions['Sort By']
-        sort_added = tuple(ac for ac in self.context_menu.actions() if ac is sac.qaction)
-        if sort_added:
-            sac.update_menu()
         m = clone_menu(self.context_menu) if islinux else self.context_menu
         m.popup(event.globalPos())
         event.accept()
@@ -918,6 +924,15 @@ class BooksView(QTableView):  # {{{
                 if select:
                     sm = self.selectionModel()
                     sm.select(index, sm.ClearAndSelect|sm.Rows)
+
+    def select_cell(self, row_number=0, logical_column=0):
+        if row_number > -1 and row_number < self.model().rowCount(QModelIndex()):
+            index = self.model().index(row_number, logical_column)
+            self.setCurrentIndex(index)
+            sm = self.selectionModel()
+            sm.select(index, sm.ClearAndSelect|sm.Rows)
+            sm.select(index, sm.Current)
+            self.clicked.emit(index)
 
     def row_at_top(self):
         pos = 0
@@ -1140,6 +1155,10 @@ class DeviceBooksView(BooksView):  # {{{
             self.setItemDelegateForColumn(i, TextDelegate(self))
         self.setDragDropMode(self.NoDragDrop)
         self.setAcceptDrops(False)
+        self.set_row_header_visibility()
+
+    def set_row_header_visibility(self):
+        self.row_header.setVisible(gprefs['row_numbers_in_book_list'])
 
     def drag_data(self):
         m = self.model()
@@ -1197,4 +1216,3 @@ class DeviceBooksView(BooksView):  # {{{
         self.drag_allowed = supports_backloading
 
 # }}}
-

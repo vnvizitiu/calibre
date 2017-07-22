@@ -21,6 +21,7 @@ from PyQt5.Qt import (
     QToolButton, QVBoxLayout, QSpacerItem, QTimer)
 
 from calibre import prepare_string_for_xml
+from calibre.utils.localization import get_lang
 from calibre.gui2 import info_dialog
 from calibre.gui2.keyboard import ShortcutConfig
 from calibre.gui2.tweak_book import tprefs, toolbar_actions, editor_toolbar_actions, actions
@@ -163,7 +164,7 @@ class EditorSettings(BasicSettings):
         fc = FontFamilyChooser(self)
         self('editor_font_family', widget=fc, getter=attrgetter('font_family'), setter=lambda x, val: setattr(x, 'font_family', val))
         fc.family_changed.connect(self.emit_changed)
-        l.addRow(_('Editor font &family:'), fc)
+        l.addRow(_('Editor font family:'), fc)
 
         fs = self('editor_font_size')
         fs.setMinimum(8), fs.setSuffix(' pt'), fs.setMaximum(50)
@@ -180,7 +181,7 @@ class EditorSettings(BasicSettings):
 
         tw = self('editor_tab_stop_width')
         tw.setMinimum(2), tw.setSuffix(_(' characters')), tw.setMaximum(20)
-        l.addRow(_('Width of &tabs:'), tw)
+        l.addRow(_('W&idth of tabs:'), tw)
 
         self.tb = b = QPushButton(_('Change &templates'))
         l.addRow(_('Templates for new files:'), b)
@@ -199,31 +200,31 @@ class EditorSettings(BasicSettings):
         l.addRow(lw)
 
         lw = self('auto_close_tags')
-        lw.setText(_('Auto &close tags when typing </'))
+        lw.setText(_('Auto close t&ags when typing </'))
         lw.setToolTip('<p>' + prepare_string_for_xml(_(
             'With this option, every time you type </ the current HTML closing tag is auto-completed')))
         l.addRow(lw)
 
         lw = self('editor_show_char_under_cursor')
-        lw.setText(_('Show the name of the current character before the cursor along with the line and column number'))
+        lw.setText(_('Show the &name of the current character before the cursor along with the line and column number'))
         l.addRow(lw)
 
         lw = self('pretty_print_on_open')
-        lw.setText(_('Beautify individual files automatically when they are opened'))
+        lw.setText(_('Beautify individual &files automatically when they are opened'))
         lw.setToolTip('<p>' + _(
             'This will cause the beautify current file action to be performed automatically every'
             ' time you open a HTML/CSS/etc. file for editing.'))
         l.addRow(lw)
 
         lw = self('inline_spell_check')
-        lw.setText(_('Show misspelled words underlined in the code view'))
+        lw.setText(_('Show &misspelled words underlined in the code view'))
         lw.setToolTip('<p>' + _(
             'This will cause spelling errors to be highlighted in the code view'
             ' for easy correction as you type.'))
         l.addRow(lw)
 
         lw = self('editor_accepts_drops')
-        lw.setText(_('Allow drag and drop editing of text'))
+        lw.setText(_('Allow drag and drop &editing of text'))
         lw.setToolTip('<p>' + _(
             'Allow using drag and drop to move text around in the editor.'
             ' It can be useful to turn this off if you have a misbehaving touchpad.'))
@@ -277,14 +278,14 @@ class IntegrationSettings(BasicSettings):
         self.setLayout(l)
 
         um = self('update_metadata_from_calibre')
-        um.setText(_('Update metadata embedded in the book when opening'))
+        um.setText(_('Update &metadata embedded in the book when opening'))
         um.setToolTip('<p>' + _(
             'When the file is opened, update the metadata embedded in the book file to the current metadata'
             ' in the calibre library.'))
         l.addRow(um)
 
         ask = self('choose_tweak_fmt')
-        ask.setText(_('Ask which format to edit if more than one format is available for the book'))
+        ask.setText(_('Ask which &format to edit if more than one format is available for the book'))
         l.addRow(ask)
 
         order = self.order_widget('tweak_fmt_order')
@@ -301,7 +302,7 @@ class MainWindowSettings(BasicSettings):
         self.setLayout(l)
 
         nd = self('nestable_dock_widgets')
-        nd.setText(_('Allow dockable windows to be nested inside the dock areas'))
+        nd.setText(_('Allow dockable &windows to be nested inside the dock areas'))
         nd.setToolTip('<p>' + _(
             'By default, you can have only a single row or column of windows in the dock'
             ' areas (the areas around the central editors). This option allows'
@@ -314,11 +315,11 @@ class MainWindowSettings(BasicSettings):
                        'horizontal':{'top':_('Top'), 'bottom':_('Bottom')}[v]}
             name = 'dock_%s_%s' % (v, h)
             w = self.choices_widget(name, choices, 'horizontal', 'horizontal')
-            cn = {('top', 'left'): _('The top-left corner'), ('top', 'right'):_('The top-right corner'),
-                  ('bottom', 'left'):_('The bottom-left corner'), ('bottom', 'right'):_('The bottom-right corner')}[(v, h)]
+            cn = {('top', 'left'): _('The &top-left corner'), ('top', 'right'):_('The top-&right corner'),
+                  ('bottom', 'left'):_('The &bottom-left corner'), ('bottom', 'right'):_('The bottom-ri&ght corner')}[(v, h)]
             l.addRow(cn + ':', w)
         nd = self('restore_book_state')
-        nd.setText(_('Restore state of previously edited book when opening it again'))
+        nd.setText(_('Restore &state of previously edited book when opening it again'))
         nd.setToolTip('<p>' + _(
             'When opening a previously edited book again, restore its state. That means all open'
             ' files are automatically re-opened and the cursor is positioned at its previous location.'
@@ -326,7 +327,7 @@ class MainWindowSettings(BasicSettings):
         l.addRow(nd)
 
         nd = self('file_list_shows_full_pathname')
-        nd.setText(_('Show full file paths in the Files Browser'))
+        nd.setText(_('Show full &file paths in the File browser'))
         nd.setToolTip('<p>' + _(
             'Showing the full file paths is useful when editing books that contain'
             ' multiple files with the same file name.'
@@ -354,7 +355,7 @@ class PreviewSettings(BasicSettings):
             l.addRow(_('Font family for &%s:') % text, w)
 
         w = self.choices_widget('preview_standard_font_family', families, 'serif', 'serif')
-        l.addRow(_('&Style for standard text:'), w)
+        l.addRow(_('Style for standard &text:'), w)
 
         w = self('preview_base_font_size')
         w.setMinimum(8), w.setMaximum(100), w.setSuffix(' px')
@@ -587,13 +588,17 @@ class TemplatesDialog(Dialog):  # {{{
     def setup_ui(self):
         from calibre.gui2.tweak_book.templates import DEFAULT_TEMPLATES
         from calibre.gui2.tweak_book.editor.text import TextEdit
-        self.l = l = QFormLayout(self)
-        self.setLayout(l)
+        # Cannot use QFormLayout as it does not play nice with TextEdit on windows
+        self.l = l = QVBoxLayout(self)
 
         self.syntaxes = s = QComboBox(self)
         s.addItems(sorted(DEFAULT_TEMPLATES.iterkeys()))
         s.setCurrentIndex(s.findText('html'))
-        l.addRow(_('Choose the &type of template to edit:'), s)
+        h = QHBoxLayout()
+        l.addLayout(h)
+        la = QLabel(_('Choose the &type of template to edit:'))
+        la.setBuddy(s)
+        h.addWidget(la), h.addWidget(s), h.addStretch(10)
         s.currentIndexChanged.connect(self.show_template)
 
         self.helpl = la = QLabel(_(
@@ -602,14 +607,14 @@ class TemplatesDialog(Dialog):  # {{{
             ' for example for CSS rules, you have to escape them, like this: {3}').format(*['<code>%s</code>'%x for x in
                 ['{TITLE}', '{AUTHOR}', '%CURSOR%', 'body {{ color: red }}']]))
         la.setWordWrap(True)
-        l.addRow(la)
+        l.addWidget(la)
 
         self.save_timer = t = QTimer(self)
         t.setSingleShot(True), t.setInterval(100)
         t.timeout.connect(self._save_syntax)
 
         self.editor = e = TextEdit(self)
-        l.addRow(e)
+        l.addWidget(e)
         e.textChanged.connect(self.save_syntax)
 
         self.show_template()
@@ -618,7 +623,7 @@ class TemplatesDialog(Dialog):  # {{{
         self.bb.addButton(self.bb.Close)
         self.rd = b = self.bb.addButton(self.bb.RestoreDefaults)
         b.clicked.connect(self.restore_defaults)
-        l.addRow(self.bb)
+        l.addWidget(self.bb)
 
     @property
     def current_syntax(self):
@@ -658,7 +663,7 @@ class Preferences(QDialog):
         QDialog.__init__(self, gui)
         self.l = l = QGridLayout(self)
         self.setLayout(l)
-        self.setWindowTitle(_('Preferences for Edit Book'))
+        self.setWindowTitle(_('Preferences for Edit book'))
         self.setWindowIcon(QIcon(I('config.png')))
 
         self.stacks = QStackedWidget(self)
@@ -672,19 +677,20 @@ class Preferences(QDialog):
         cl.setMovement(cl.Static)
         cl.setWrapping(False)
         cl.setSpacing(15)
-        cl.setWordWrap(True)
+        if get_lang()[:2] not in ('zh', 'ja'):
+            cl.setWordWrap(True)
         l.addWidget(cl, 0, 0, 1, 1)
 
         self.bb = bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
-        self.rdb = b = bb.addButton(_('Restore all defaults'), bb.ResetRole)
+        self.rdb = b = bb.addButton(_('Restore all &defaults'), bb.ResetRole)
         b.setToolTip(_('Restore defaults for all preferences'))
         b.clicked.connect(self.restore_all_defaults)
-        self.rcdb = b = bb.addButton(_('Restore current defaults'), bb.ResetRole)
+        self.rcdb = b = bb.addButton(_('Restore &current defaults'), bb.ResetRole)
         b.setToolTip(_('Restore defaults for currently displayed preferences'))
         b.clicked.connect(self.restore_current_defaults)
-        self.rconfs = b = bb.addButton(_('Restore confirmations'), bb.ResetRole)
+        self.rconfs = b = bb.addButton(_('Restore c&onfirmations'), bb.ResetRole)
         b.setToolTip(_('Restore all disabled confirmation prompts'))
         b.clicked.connect(self.restore_confirmations)
 
@@ -719,7 +725,7 @@ class Preferences(QDialog):
         cl.item(0).setSelected(True)
         w, h = cl.sizeHintForColumn(0), 0
         for i in xrange(cl.count()):
-            h = max(h, cl.sizeHintForRow(i))
+            h = cl.sizeHintForRow(i)
             cl.item(i).setSizeHint(QSize(w, h))
 
         cl.setMaximumWidth(cl.sizeHintForColumn(0) + 35)
@@ -767,6 +773,7 @@ class Preferences(QDialog):
     def reject(self):
         tprefs.set('preferences_geom', bytearray(self.saveGeometry()))
         QDialog.reject(self)
+
 
 if __name__ == '__main__':
     from calibre.gui2 import Application

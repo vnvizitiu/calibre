@@ -9,6 +9,7 @@ __docformat__ = 'restructuredtext en'
 
 import datetime
 from io import BytesIO
+from time import time
 
 from calibre.utils.date import utc_tz
 from calibre.db.tests.base import BaseTest
@@ -234,6 +235,22 @@ class ReadingTest(BaseTest):
         cache = None
         for mi2, mi1 in zip(new_metadata.values(), old_metadata.values()):
             self.compare_metadata(mi1, mi2)
+    # }}}
+
+    def test_serialize_metadata(self):  # {{{
+        from calibre.utils.serialize import json_dumps, json_loads, msgpack_dumps, msgpack_loads
+        from calibre.library.field_metadata import fm_as_dict
+        cache = self.init_cache(self.library_path)
+        fm = cache.field_metadata
+        for d, l in ((json_dumps, json_loads), (msgpack_dumps, msgpack_loads)):
+            fm2 = l(d(fm))
+            self.assertEqual(fm_as_dict(fm), fm_as_dict(fm2))
+        for i in xrange(1, 4):
+            mi = cache.get_metadata(i, get_cover=True, cover_as_data=True)
+            rmi = msgpack_loads(msgpack_dumps(mi))
+            self.compare_metadata(mi, rmi, exclude='format_metadata has_cover formats id'.split())
+            rmi = json_loads(json_dumps(mi))
+            self.compare_metadata(mi, rmi, exclude='format_metadata has_cover formats id'.split())
     # }}}
 
     def test_get_cover(self):  # {{{
@@ -482,13 +499,21 @@ class ReadingTest(BaseTest):
     def test_restrictions(self):  # {{{
         ' Test searching with and without restrictions '
         cache = self.init_cache()
-        self.assertSetEqual(cache.all_book_ids(), cache.search(''))
-        self.assertSetEqual({1, 2}, cache.search('', 'not authors:=Unknown'))
-        self.assertSetEqual(set(), cache.search('authors:=Unknown', 'not authors:=Unknown'))
-        self.assertSetEqual({2}, cache.search('not authors:"=Author Two"', 'not authors:=Unknown'))
-        self.assertSetEqual({2}, cache.search('not authors:"=Author Two"', book_ids={1, 2}))
-        self.assertSetEqual({2}, cache.search('not authors:"=Author Two"', 'not authors:=Unknown', book_ids={1,2,3}))
-        self.assertSetEqual(set(), cache.search('authors:=Unknown', 'not authors:=Unknown', book_ids={1,2,3}))
+        se = self.assertSetEqual
+        se(cache.all_book_ids(), cache.search(''))
+        se({1, 2}, cache.search('', 'not authors:=Unknown'))
+        se(set(), cache.search('authors:=Unknown', 'not authors:=Unknown'))
+        se({2}, cache.search('not authors:"=Author Two"', 'not authors:=Unknown'))
+        se({2}, cache.search('not authors:"=Author Two"', book_ids={1, 2}))
+        se({2}, cache.search('not authors:"=Author Two"', 'not authors:=Unknown', book_ids={1,2,3}))
+        se(set(), cache.search('authors:=Unknown', 'not authors:=Unknown', book_ids={1,2,3}))
+        se(cache.all_book_ids(), cache.books_in_virtual_library(''))
+        se(cache.all_book_ids(), cache.books_in_virtual_library('does not exist'))
+        cache.set_pref('virtual_libraries', {'1':'title:"=Title One"', '12':'id:1 or id:2'})
+        se({2}, cache.books_in_virtual_library('1'))
+        se({1,2}, cache.books_in_virtual_library('12'))
+        se({1}, cache.books_in_virtual_library('12', 'id:1'))
+        se({2}, cache.books_in_virtual_library('1', 'id:1 or id:2'))
     # }}}
 
     def test_search_caching(self):  # {{{
@@ -667,4 +692,16 @@ class ReadingTest(BaseTest):
         ):
             self.assertEqual(books, cache.find_identical_books(mi))
             self.assertEqual(books, find_identical_books(mi, data))
+    # }}}
+
+    def test_last_read_positions(self):  # {{{
+        cache = self.init_cache(self.library_path)
+        self.assertFalse(cache.get_last_read_positions(1, 'x', 'u'))
+        self.assertRaises(Exception, cache.set_last_read_position, 12, 'x', cfi='c')
+        epoch = time()
+        cache.set_last_read_position(1, 'EPUB', 'user', 'device', 'cFi', epoch, 0.3)
+        self.assertFalse(cache.get_last_read_positions(1, 'x', 'u'))
+        self.assertEqual(cache.get_last_read_positions(1, 'ePuB', 'user'), [{'epoch':epoch, 'device':'device', 'cfi':'cFi', 'pos_frac':0.3}])
+        cache.set_last_read_position(1, 'EPUB', 'user', 'device')
+        self.assertFalse(cache.get_last_read_positions(1, 'ePuB', 'user'))
     # }}}

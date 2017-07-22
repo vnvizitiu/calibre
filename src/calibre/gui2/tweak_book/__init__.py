@@ -12,6 +12,7 @@ from future_builtins import map
 from calibre.utils.config import JSONConfig
 from calibre.spell.dictionary import Dictionaries, parse_lang_code
 
+CONTAINER_DND_MIMETYPE = 'application/x-calibre-container-name-list'
 tprefs = JSONConfig('tweak_book_gui')
 d = tprefs.defaults
 
@@ -83,6 +84,7 @@ ucase_map = {l:string.ascii_uppercase[i] for i, l in enumerate(string.ascii_lowe
 def capitalize(x):
     return ucase_map[x[0]] + x[1:]
 
+
 _current_container = None
 
 
@@ -101,6 +103,7 @@ class NonReplaceDict(dict):
         if k in self:
             raise ValueError('The key %s is already present' % k)
         dict.__setitem__(self, k, v)
+
 
 actions = NonReplaceDict()
 editors = NonReplaceDict()
@@ -151,4 +154,4 @@ def update_mark_text_action(ed=None):
     if ed is not None and ed.has_line_numbers:
         has_mark = bool(ed.selected_text) or not ed.has_marked_text
     ac = actions['mark-selected-text']
-    ac.setText(ac.default_text if has_mark else _('Unmark marked text'))
+    ac.setText(ac.default_text if has_mark else _('&Unmark marked text'))

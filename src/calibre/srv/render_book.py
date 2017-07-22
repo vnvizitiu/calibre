@@ -26,7 +26,7 @@ from calibre.ebooks.oeb.polish.cover import set_epub_cover, find_cover_image
 from calibre.ebooks.oeb.polish.css import transform_css
 from calibre.ebooks.oeb.polish.utils import extract
 from calibre.ebooks.css_transform_rules import StyleDeclaration
-from calibre.ebooks.oeb.polish.toc import get_toc
+from calibre.ebooks.oeb.polish.toc import get_toc, get_landmarks
 from calibre.ebooks.oeb.polish.utils import guess_type
 from calibre.utils.short_uuid import uuid4
 from calibre.utils.logging import default_log
@@ -54,6 +54,7 @@ def encode_url(name, frag=''):
 def decode_url(x):
     parts = x.split('#', 1)
     return decode_component(parts[0]), (parts[1] if len(parts) > 1 else '')
+
 
 absolute_units = frozenset('px mm cm pt in pc q'.split())
 length_factors = {'mm':2.8346456693, 'cm':28.346456693, 'in': 72, 'pc': 12, 'q':0.708661417325}
@@ -114,17 +115,33 @@ def has_ancestor(elem, q):
     return False
 
 
+def anchor_map(root):
+    ans = []
+    seen = set()
+    for elem in root.xpath('//*[@id or @name]'):
+        eid = elem.get('id')
+        if not eid and elem.tag.endswith('}a'):
+            eid = elem.get('name')
+            if eid:
+                elem.set('id', eid)
+        if eid and eid not in seen:
+            ans.append(eid)
+            seen.add(eid)
+    return ans
+
+
 def get_length(root):
     strip_space = re.compile(r'\s+')
     ans = 0
+    ignore_tags = frozenset('script style title noscript'.split())
 
     def count(elem):
         num = 0
         tname = elem.tag.rpartition('}')[-1].lower()
-        if elem.text and tname not in 'script style':
-            num += len(strip_space.sub(elem.text, ''))
+        if elem.text and tname not in ignore_tags:
+            num += len(strip_space.sub('', elem.text))
         if elem.tail:
-            num += len(strip_space.sub(elem.tail, ''))
+            num += len(strip_space.sub('', elem.tail))
         if tname in 'img svg':
             num += 2000
         return num
@@ -134,6 +151,21 @@ def get_length(root):
         for elem in body.iterdescendants('*'):
             ans += count(elem)
     return ans
+
+
+def toc_anchor_map(toc):
+    ans = defaultdict(list)
+    seen_map = defaultdict(set)
+
+    def process_node(node):
+        name = node['dest']
+        if name and node['id'] not in seen_map[name]:
+            ans[name].append({'id':node['id'], 'frag':node['frag']})
+            seen_map[name].add(node['id'])
+        tuple(map(process_node, node['children']))
+
+    process_node(toc)
+    return dict(ans)
 
 
 class Container(ContainerBase):
@@ -150,11 +182,15 @@ class Container(ContainerBase):
             name == 'mimetype'
         }
         raster_cover_name, titlepage_name = self.create_cover_page(input_fmt.lower())
+        toc = get_toc(self).to_dict(count())
+        spine = [name for name, is_linear in self.spine_names]
+        spineq = frozenset(spine)
+        landmarks = [l for l in get_landmarks(self) if l['dest'] in spineq]
 
         self.book_render_data = data = {
             'version': RENDER_VERSION,
-            'toc':get_toc(self).as_dict,
-            'spine':[name for name, is_linear in self.spine_names],
+            'toc':toc,
+            'spine':spine,
             'link_uid': uuid4(),
             'book_hash': book_hash,
             'is_comic': input_fmt.lower() in {'cbc', 'cbz', 'cbr', 'cb7'},
@@ -163,6 +199,8 @@ class Container(ContainerBase):
             'has_maths': False,
             'total_length': 0,
             'spine_length': 0,
+            'toc_anchor_map': toc_anchor_map(toc),
+            'landmarks': landmarks,
         }
         # Mark the spine as dirty since we have to ensure it is normalized
         for name in data['spine']:
@@ -188,6 +226,7 @@ class Container(ContainerBase):
                 ans['has_maths'] = hm = check_for_maths(root)
                 if hm:
                     self.book_render_data['has_maths'] = True
+                ans['anchor_map'] = anchor_map(root)
             return ans
         data['files'] = {name:manifest_data(name) for name in set(self.name_path_map) - excluded_names}
         self.commit()
@@ -200,8 +239,12 @@ class Container(ContainerBase):
         templ = '''
         <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
         <head><style>
-        html, body, img { height: 100%%; display: block; margin: 0; padding: 0; border-width: 0; }
-        img { width: auto; margin-left:auto; margin-right: auto; }
+        html, body, img { height: 100vh; display: block; margin: 0; padding: 0; border-width: 0; }
+        img {
+            width: auto; height: auto;
+            margin-left: auto; margin-right: auto;
+            max-width: 100vw; max-height: 100vh
+        }
         </style></head><body><img src="%s"/></body></html>
         '''
         if input_fmt == 'epub':
@@ -312,7 +355,7 @@ class Container(ContainerBase):
                     changed.add(name)
             elif mt == 'image/svg+xml':
                 self.virtualized_names.add(name)
-                changed = False
+                changed.add(name)
                 xlink = XLINK('href')
                 for elem in xlink_xpath(self.parsed(name)):
                     elem.set(xlink, link_replacer(name, elem.get(xlink)))
@@ -453,7 +496,7 @@ def html_as_dict(root):
     stack = [(root, tree)]
     while stack:
         elem, node = stack.pop()
-        for i, child in enumerate(elem.iterchildren('*')):
+        for child in elem.iterchildren('*'):
             cnode = serialize_elem(child, nsmap)
             if cnode is not None:
                 tags.append(cnode)
@@ -466,6 +509,7 @@ def html_as_dict(root):
 
 def render(pathtoebook, output_dir, book_hash=None):
     Container(pathtoebook, output_dir, book_hash=book_hash)
+
 
 if __name__ == '__main__':
     render(sys.argv[-2], sys.argv[-1])
